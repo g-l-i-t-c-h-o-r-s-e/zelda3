@@ -378,8 +378,8 @@ static const int8 kIntroSprite0_Xvel[3] = { 1, 0, -1 };
 static const int8 kIntroSprite0_Yvel[3] = { -1, 1, -1 };
 
 void Intro_SpriteType_A_0(int k) {
-  static const int16 kIntroSprite0_X[3] = { -38, 95, 230 };
-  static const int16 kIntroSprite0_Y[3] = { 200, -67, 200 };
+  static const int16 kIntroSprite0_X[3] = { -14, 97, 140 };
+  static const int16 kIntroSprite0_Y[3] = { 200, -64, 200 };
   intro_x_lo[k] = kIntroSprite0_X[k];
   intro_x_hi[k] = kIntroSprite0_X[k] >> 8;
   intro_y_lo[k] = kIntroSprite0_Y[k];
@@ -430,8 +430,8 @@ void AnimateSceneSprite_DrawTriangle(int k) {
 }
 
 void Intro_SpriteType_B_0(int k) {
-  static const uint8 kIntroSprite0_XLimit[3] = { 75, 95, 117 };
-  static const uint8 kIntroSprite0_YLimit[3] = { 88, 48, 88 };
+  static const int16 kIntroSprite0_XLimit[3] = { -15, 98, 139 };
+  static const int16 kIntroSprite0_YLimit[3] = { 88, 48, 88 };
 
   AnimateSceneSprite_DrawTriangle(k);
   AnimateSceneSprite_MoveTriangle(k);
