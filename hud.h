@@ -65,3 +65,4 @@ void Hud_RefreshIcon();
 void Hud_RebuildIndoor();
 
 extern const uint16 *const kHudItemBoxGfxPtrs[];
+extern int nobeep;

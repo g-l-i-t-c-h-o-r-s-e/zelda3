@@ -37,6 +37,8 @@ static void renderScreen(SDL_Renderer* renderer, SDL_Texture* texture);
 static void handleInput(int keyCode, int modCode, bool pressed);
 
 int input1_current_state;
+int nobeep = 0;
+
 
 void setButtonState(int button, bool pressed) {
   // set key in constroller
@@ -69,6 +71,18 @@ int main(int argc, char** argv) {
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_JOYSTICK) != 0) {
     printf("Failed to init SDL: %s\n", SDL_GetError());
     return 1;
+  }
+
+
+  if (argv[1] != NULL) {
+      if (strcmp(argv[1], "nobeep") == 1) {
+          nobeep = 0;
+      }
+
+      if (strcmp(argv[1], "nobeep") == 0) {
+          nobeep = 1;
+          printf("Low Health Beep Disabled!\n");
+      }
   }
 
   
@@ -116,9 +130,9 @@ int main(int argc, char** argv) {
   SDL_PauseAudioDevice(device, 0);
 
   Snes *snes = snes_init(g_emulated_ram), *snes_run = NULL;
-  if (argc >= 2 && !g_run_without_emu) {
+  if (argc > 2 && (strcmp(argv[2], ".sfc") == 1) && !g_run_without_emu) {
     // init snes, load rom
-    bool loaded = loadRom(argv[1], snes);
+    bool loaded = loadRom(argv[2], snes);
     if (!loaded) {
       puts("No rom loaded");
       return 1;

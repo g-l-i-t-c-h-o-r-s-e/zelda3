@@ -77,11 +77,17 @@ void Hud_RefillLogic() {
     if (link_lowlife_countdown_timer_beep) {
       link_lowlife_countdown_timer_beep--;
     } else if (!sound_effect_1) {
-      sound_effect_1 = 43;
+        
+        if (nobeep == 1) {
+            sound_effect_1 = -8; //disable somewhat annoying beeps
+        }
+        if (nobeep == 0) {
+            sound_effect_1 = 43;
+        }
+
       link_lowlife_countdown_timer_beep = 32 - 1;
     }
   }
-
   if (is_doing_heart_animation)
     goto doing_animation;
   if (link_hearts_filler) {
