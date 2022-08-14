@@ -67,6 +67,7 @@ Additionally, the following commands are available:
 | P   | Pause                 |
 | T   | Toggle replay turbo   |
 | K   | Clear all input history from current snapshot  |
+| Tab   | Toggle Emulation Speed/Turbo Mode   |
 | F1-F10 | Load snapshot      |
 | Shift+F1-F10 | Save snapshot |
 | Ctrl+F1-F10 | Replay the snapshot |
