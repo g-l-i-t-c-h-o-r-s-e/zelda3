@@ -66,10 +66,18 @@ Additionally, the following commands are available:
 | E   | Hard reset            |
 | P   | Pause                 |
 | T   | Toggle replay turbo   |
+| Tab   | Fast Forward/Turbo Mode   |
 | K   | Clear all input history from current snapshot  |
 | F1-F10 | Load snapshot      |
 | Shift+F1-F10 | Save snapshot |
 | Ctrl+F1-F10 | Replay the snapshot |
+
+Command Line Flags:
+
+| Flag | Action                |
+| --- | --------------------- |
+| nobeep  | disable low health beep |
+| rom_name.sfc   | compare rom to zelda3.exe |
 
 Additionally, there are a bunch of included playthrough snapshots that play all dungeons of the game. You access them with the digit keys. If you want to replay the stage in turbo mode, press Ctrl+Digit (eg Ctrl-5).
 
