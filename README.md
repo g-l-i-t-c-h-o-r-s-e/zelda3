@@ -72,7 +72,7 @@ Additionally, the following commands are available:
 | Shift+F1-F10 | Save snapshot |
 | Ctrl+F1-F10 | Replay the snapshot |
 
-Command Line Flags:
+Command Line / Start up Flags:
 
 | Flag | Action                |
 | --- | --------------------- |
