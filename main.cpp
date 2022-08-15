@@ -19,6 +19,9 @@
 extern uint8 g_emulated_ram[0x20000];
 bool g_run_without_emu = false;
 
+bool fast_forward = false;
+int fast_forward_counter = 0;
+
 void PatchRom(uint8_t *rom);
 void SetSnes(Snes *snes);
 void RunAudioPlayer();
@@ -54,7 +57,7 @@ int main(int argc, char** argv) {
     printf("Failed to init SDL: %s\n", SDL_GetError());
     return 1;
   }
-  SDL_Window* window = SDL_CreateWindow("Zelda3", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 512, 480, 0);
+  SDL_Window* window = SDL_CreateWindow("Zelda3", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 512*2, 480*2, 0);
   if(window == NULL) {
     printf("Failed to create window: %s\n", SDL_GetError());
     return 1;
@@ -205,6 +208,13 @@ int main(int argc, char** argv) {
 
     playAudio(snes_run, device, audioBuffer);
     renderScreen(renderer, texture);
+	
+	
+    if (fast_forward) {
+      if ((fast_forward_counter++ & 3) != 0) {
+        continue;
+      }
+    }
 
     SDL_RenderPresent(renderer); // vsyncs to 60 FPS
     // if vsync isn't working, delay manually
@@ -327,6 +337,10 @@ static void handleInput(int keyCode, int keyMod, bool pressed) {
           (keyMod & KMOD_SHIFT) != 0 ? kSaveLoad_Save : kSaveLoad_Load,
           keyCode - SDLK_F1);
       }
+      break;
+    case SDLK_TAB:
+      fast_forward = pressed;
+      printf("Fast Forward: %d\n", fast_forward);
       break;
   }
 }
