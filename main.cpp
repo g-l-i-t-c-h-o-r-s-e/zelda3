@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <string>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -18,9 +17,6 @@
 
 extern uint8 g_emulated_ram[0x20000];
 bool g_run_without_emu = false;
-
-bool fast_forward = false;
-int fast_forward_counter = 0;
 
 void PatchRom(uint8_t *rom);
 void SetSnes(Snes *snes);
@@ -38,8 +34,6 @@ static void renderScreen(SDL_Renderer* renderer, SDL_Texture* texture);
 static void handleInput(int keyCode, int modCode, bool pressed);
 
 int input1_current_state;
-int nobeep = 0;
-
 
 void setButtonState(int button, bool pressed) {
   // set key in constroller
@@ -50,56 +44,15 @@ void setButtonState(int button, bool pressed) {
   }
 }
 
-#define SNES_BTN_B        0
-#define SNES_BTN_Y        1
-#define SNES_BTN_SELECT   2
-#define SNES_BTN_START    3
-#define SNES_BTN_UP       4
-#define SNES_BTN_DOWN     5
-#define SNES_BTN_LEFT     6
-#define SNES_BTN_RIGHT    7
-#define SNES_BTN_A        8
-#define SNES_BTN_X        9
-#define SNES_BTN_L        10
-#define SNES_BTN_R        11
-
-SDL_Joystick* gGameController = NULL;
-
 
 #undef main
 int main(int argc, char** argv) {
   // set up SDL
-  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_JOYSTICK) != 0) {
+  if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
     printf("Failed to init SDL: %s\n", SDL_GetError());
     return 1;
   }
-
-
-  if (argv[1] != NULL) {
-      if (strcmp(argv[1], "nobeep") == 1) {
-          nobeep = 0;
-      }
-
-      if (strcmp(argv[1], "nobeep") == 0) {
-          nobeep = 1;
-          printf("Low Health Beep Disabled!\n");
-      }
-  }
-
-  
-  // check for joysticks
-  if (SDL_NumJoysticks() < 1) {
-    printf("Warning: No joysticks connected!\n");
-  } else {
-    // Load joystick
-    gGameController = SDL_JoystickOpen(0);
-    if (gGameController == NULL) {
-      printf("Warning: Unable to open game controller! SDL Error: %s\n", SDL_GetError());
-    }
-  }
-
-
-  SDL_Window* window = SDL_CreateWindow("Zelda3", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 512 * 2, 480 * 2, 0);
+  SDL_Window* window = SDL_CreateWindow("Zelda3", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 512, 480, 0);
   if(window == NULL) {
     printf("Failed to create window: %s\n", SDL_GetError());
     return 1;
@@ -131,36 +84,14 @@ int main(int argc, char** argv) {
   SDL_PauseAudioDevice(device, 0);
 
   Snes *snes = snes_init(g_emulated_ram), *snes_run = NULL;
-
-  if (argv[2] != NULL) {
-      std::string haystack = argv[2];
-      std::string needle = ".sfc";
-
-      if (haystack.find(needle) != std::string::npos && !g_run_without_emu) {
-          puts(argv[2]);
-          // init snes, load rom
-          bool loaded = loadRom(argv[2], snes);
-          if (!loaded) {
-              puts("No rom loaded");
-              return 1;
-          }
-          snes_run = snes;
-      }
-  }
-  if (argv[1] != NULL) {
-      std::string haystack = argv[1];
-      std::string needle = ".sfc";
-
-      if (haystack.find(needle) != std::string::npos && !g_run_without_emu) {
-          puts(argv[1]);
-          // init snes, load rom
-          bool loaded = loadRom(argv[1], snes);
-          if (!loaded) {
-              puts("No rom loaded");
-              return 1;
-          }
-          snes_run = snes;
-      }
+  if (argc >= 2 && !g_run_without_emu) {
+    // init snes, load rom
+    bool loaded = loadRom(argv[1], snes);
+    if (!loaded) {
+      puts("No rom loaded");
+      return 1;
+    }
+    snes_run = snes;
   } else {
     snes_reset(snes, true);
   }
@@ -215,107 +146,6 @@ int main(int argc, char** argv) {
           handleInput(event.key.keysym.sym, event.key.keysym.mod, false);
           break;
         }
-        case SDL_JOYAXISMOTION: {
-            // only first controller for now:
-            if (event.jaxis.which != 0) {
-                break;
-            }
-
-            //printf("Axis Moved : %d, %d\n", event.jaxis.axis, event.jaxis.value);
-            if (event.jaxis.axis == 0) {
-                if (event.jaxis.value <= -8000) {
-                    setButtonState(6, true);
-                    setButtonState(7, false);
-                }
-                else if (event.jaxis.value > 8000) {
-                    setButtonState(6, false);
-                    setButtonState(7, true);
-                }
-                else {
-                    setButtonState(6, false);
-                    setButtonState(7, false);
-                }
-            }
-            if (event.jaxis.axis == 1) {
-                if (event.jaxis.value <= -8000) {
-                    setButtonState(4, true);
-                    setButtonState(5, false);
-                }
-                else if (event.jaxis.value > 8000) {
-                    setButtonState(4, false);
-                    setButtonState(5, true);
-                }
-                else {
-                    setButtonState(4, false);
-                    setButtonState(5, false);
-                }
-            }
-            break;
-        }
-        case SDL_JOYHATMOTION: {
-            //printf("Hat Moved : %d\n", event.jhat.value);
-            setButtonState(4, (event.jhat.value & 1) == 1);
-            setButtonState(5, (event.jhat.value & 4) == 4);
-            setButtonState(6, (event.jhat.value & 8) == 8);
-            setButtonState(7, (event.jhat.value & 2) == 2);
-            break;
-        }
-        case SDL_JOYBUTTONDOWN: {
-            printf("Button Pressed : %d\n", event.jbutton.button);
-            if (event.jbutton.button == 0) {
-                setButtonState(SNES_BTN_A, true);
-            }
-            else if (event.jbutton.button == 1) {
-                setButtonState(SNES_BTN_B, true);
-            }
-            else if (event.jbutton.button == 2) {
-                setButtonState(SNES_BTN_X, true);
-            }
-            else if (event.jbutton.button == 3) {
-                setButtonState(SNES_BTN_Y, true);
-            }
-            else if (event.jbutton.button == 4) {
-                setButtonState(SNES_BTN_L, true);
-            }
-            else if (event.jbutton.button == 5) {
-                setButtonState(SNES_BTN_R, true);
-            }
-            else if (event.jbutton.button == 9) {
-                setButtonState(SNES_BTN_START, true);
-            }
-            else if (event.jbutton.button == 8) {
-                setButtonState(SNES_BTN_SELECT, true);
-            }
-            break;
-        }
-        case SDL_JOYBUTTONUP: {
-            printf("Button Released : %d\n", event.jbutton.button);
-            if (event.jbutton.button == 0) {
-                setButtonState(SNES_BTN_A, false);
-            }
-            else if (event.jbutton.button == 1) {
-                setButtonState(SNES_BTN_B, false);
-            }
-            else if (event.jbutton.button == 2) {
-                setButtonState(SNES_BTN_X, false);
-            }
-            else if (event.jbutton.button == 3) {
-                setButtonState(SNES_BTN_Y, false);
-            }
-            else if (event.jbutton.button == 4) {
-                setButtonState(SNES_BTN_L, false);
-            }
-            else if (event.jbutton.button == 5) {
-                setButtonState(SNES_BTN_R, false);
-            }
-            else if (event.jbutton.button == 9) {
-                setButtonState(SNES_BTN_START, false);
-            }
-            else if (event.jbutton.button == 8) {
-                setButtonState(SNES_BTN_SELECT, false);
-            }
-            break;
-        }
         case SDL_QUIT: {
           running = false;
           break;
@@ -337,12 +167,6 @@ int main(int argc, char** argv) {
 
     playAudio(snes_run, device, audioBuffer);
     renderScreen(renderer, texture);
-
-    if (fast_forward) {
-        if ((fast_forward_counter++ & 3) != 0) {
-            continue;
-        }
-    }
 
     SDL_RenderPresent(renderer); // vsyncs to 60 FPS
     // if vsync isn't working, delay manually
@@ -466,11 +290,6 @@ static void handleInput(int keyCode, int keyMod, bool pressed) {
           keyCode - SDLK_F1);
       }
       break;
-
-    case SDLK_TAB:
-        fast_forward = pressed;
-        printf("Fast Forward: %d\n", fast_forward);
-        break;
   }
 }
 

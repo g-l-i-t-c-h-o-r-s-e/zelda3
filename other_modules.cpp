@@ -7,8 +7,9 @@
 #include "sprite.h"
 #include "messaging.h"
 #include "player_oam.h"
+#include "sprite_main.h"
 
-void Module18_GanonEmerges() {
+void Module18_GanonEmerges() {  // 829edc
   uint16 hofs2 = BG2HOFS_copy2;
   uint16 vofs2 = BG2VOFS_copy2;
   uint16 hofs1 = BG1HOFS_copy2;
@@ -88,3 +89,4 @@ void Module18_GanonEmerges() {
 
   LinkOam_Main();
 }
+

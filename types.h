@@ -71,3 +71,6 @@ union UploadVram {
 };
 
 #define uvram (*(UploadVram*)(&g_ram[0x1000]))
+
+typedef void PlayerHandlerFunc();
+typedef void HandlerFuncK(int k);

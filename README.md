@@ -11,7 +11,7 @@ You need a copy of the ROM to extract game resources (levels, images). Then once
 
 It uses the PPU and DSP implementation from LakeSnes. Additionally, it can be configured to also run the original machine code side by side. Then the RAM state is compared after each frame, to verify that the C++ implementation is correct.
 
-I got much assistance from the other Zelda 3 disassemblies that documented function names and variables.
+I got much assistance from spannierism's Zelda 3 JP disassembly and the other ones that documented loads of function names and variables.
 
 ## Compiling
 
@@ -67,7 +67,6 @@ Additionally, the following commands are available:
 | P   | Pause                 |
 | T   | Toggle replay turbo   |
 | K   | Clear all input history from current snapshot  |
-| Tab   | Toggle Emulation Speed/Turbo Mode   |
 | F1-F10 | Load snapshot      |
 | Shift+F1-F10 | Save snapshot |
 | Ctrl+F1-F10 | Replay the snapshot |

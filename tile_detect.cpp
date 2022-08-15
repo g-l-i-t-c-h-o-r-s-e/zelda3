@@ -1,16 +1,17 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <assert.h>
+#include "tile_detect.h"
 #include "zelda_rtl.h"
 #include "ancilla.h"
 #include "variables.h"
+#include "overworld.h"
 
-
-
-uint8 Overworld_GetTileAttributeAtLocation(uint16 x, uint16 y) {
+static const uint8 kDetectTiles_tab0[] = { 8, 24, 0, 15 };
+static const uint8 kDetectTiles_tab1[] = { 0, 0, 8, 8 };
+static const uint8 kDetectTiles_tab2[] = { 8, 8, 16, 16 };
+static const uint8 kDetectTiles_tab3[] = { 15, 15, 23, 23 };
+static const int8 kDetectTiles_tab4[] = { 7, 24, -1, 16 };
+static const uint8 kDetectTiles_tab5[] = { 0, 0, 8, 8 };
+static const uint8 kDetectTiles_tab6[] = { 15, 15, 23, 23 };
+uint8 Overworld_GetTileAttributeAtLocation(uint16 x, uint16 y) {  // 80882e
   uint16 t;
 
   t = ((y - overworld_offset_base_y) & overworld_offset_mask_y) * 8;
@@ -27,7 +28,232 @@ uint8 Overworld_GetTileAttributeAtLocation(uint16 x, uint16 y) {
   return rv;
 }
 
-void TileDetect_ExecuteInner(uint8 tile, uint16 offs, uint16 bits, bool is_indoors) {
+void TileDetect_Movement_Y(uint16 direction) {  // 87cdcb
+  assert(direction < 4);
+  TileDetect_ResetState();
+  tiledetect_pit_tile = 0;
+
+  tiledetect_which_y_pos[0] = (link_y_coord + kDetectTiles_tab0[direction]);
+  uint16 y = tiledetect_which_y_pos[0] & tilemap_location_calc_mask;
+  uint16 x0 = ((link_x_coord + kDetectTiles_tab1[direction]) & tilemap_location_calc_mask) >> 3;
+  uint16 x1 = ((link_x_coord + kDetectTiles_tab2[direction]) & tilemap_location_calc_mask) >> 3;
+  uint16 x2 = ((link_x_coord + kDetectTiles_tab3[direction]) & tilemap_location_calc_mask) >> 3;
+  scratch_1 = x2;
+  TileDetection_Execute(x0, y, 1);
+  TileDetection_Execute(x1, y, 2);
+  TileDetection_Execute(x2, y, 4);
+}
+
+void TileDetect_Movement_X(uint16 direction) {  // 87ce2a
+  assert(direction < 4);
+  TileDetect_ResetState();
+  tiledetect_pit_tile = 0;
+
+  uint16 x = ((link_x_coord + kDetectTiles_tab0[direction]) & tilemap_location_calc_mask) >> 3;
+  uint16 y0 = ((link_y_coord + kDetectTiles_tab1[direction]) & tilemap_location_calc_mask);
+  tiledetect_which_y_pos[0] = link_y_coord + kDetectTiles_tab2[direction];
+  uint16 y1 = tiledetect_which_y_pos[0] & tilemap_location_calc_mask;
+  tiledetect_which_y_pos[1] = link_y_coord + kDetectTiles_tab3[direction];
+  uint16 y2 = tiledetect_which_y_pos[1] & tilemap_location_calc_mask;
+  TileDetection_Execute(x, y0, 1);
+  TileDetection_Execute(x, y1, 2);
+  TileDetection_Execute(x, y2, 4);
+}
+
+void TileDetect_Movement_VerticalSlopes(uint16_t direction) {  // 87ce85
+  assert(direction < 4);
+  TileDetect_ResetState();
+  tiledetect_pit_tile = 0;
+
+  uint16 y = (link_y_coord + kDetectTiles_tab4[direction]) & tilemap_location_calc_mask;
+  uint16 x0 = ((link_x_coord + kDetectTiles_tab5[direction]) & tilemap_location_calc_mask) >> 3;
+  uint16 x1 = ((link_x_coord + kDetectTiles_tab6[direction]) & tilemap_location_calc_mask) >> 3;
+  TileDetection_Execute(x0, y, 1);
+  TileDetection_Execute(x1, y, 2);
+}
+
+void TileDetect_Movement_HorizontalSlopes(uint16_t direction) {  // 87cec9
+  assert(direction < 4);
+  TileDetect_ResetState();
+  tiledetect_pit_tile = 0;
+
+  uint16 x = ((link_x_coord + kDetectTiles_tab4[direction]) & tilemap_location_calc_mask) >> 3;
+  uint16 y0 = ((link_y_coord + kDetectTiles_tab5[direction]) & tilemap_location_calc_mask);
+  uint16 y1 = ((link_y_coord + kDetectTiles_tab6[direction]) & tilemap_location_calc_mask);
+  TileDetection_Execute(x, y0, 1);
+  TileDetection_Execute(x, y1, 2);
+}
+
+void Player_TileDetectNearby() {  // 87cf12
+  TileDetect_ResetState();
+  tiledetect_pit_tile = 0;
+
+  uint16 x0 = ((link_x_coord + kDetectTiles_tab1[0]) & tilemap_location_calc_mask) >> 3;
+  uint16 x1 = ((link_x_coord + kDetectTiles_tab3[0]) & tilemap_location_calc_mask) >> 3;
+
+  uint16 y0 = ((link_y_coord + kDetectTiles_tab1[2]) & tilemap_location_calc_mask);
+  uint16 y1 = ((link_y_coord + kDetectTiles_tab3[2]) & tilemap_location_calc_mask);
+
+  scratch_1 = y0;
+
+  TileDetection_Execute(x0, y0, 8);
+  TileDetection_Execute(x0, y1, 2);
+  TileDetection_Execute(x1, y0, 4);
+  TileDetection_Execute(x1, y1, 1);
+}
+
+void Hookshot_CheckTileCollision(int k) {  // 87d576
+  uint8 bak0 = BYTE(dungeon_room_index);
+  uint8 bak1 = link_is_on_lower_level;
+
+  if (ancilla_arr1[k]) {
+    if (!BYTE(kind_of_in_room_staircase))
+      BYTE(dungeon_room_index) += 0x10;
+    link_is_on_lower_level ^= 1;
+  }
+
+  uint16 x = Ancilla_GetX(k), y = Ancilla_GetY(k);
+  int dir = ancilla_dir[k];
+
+  tiledetect_pit_tile = 0;
+  TileDetect_ResetState();
+  if (dung_hdr_collision == 2) {
+    link_is_on_lower_level = 1;
+    Hookshot_CheckSingleLayerTileCollision(x + BG1HOFS_copy2 - BG2HOFS_copy2, y + BG1VOFS_copy2 - BG2VOFS_copy2, dir);
+    link_is_on_lower_level = 0;
+  }
+  Hookshot_CheckSingleLayerTileCollision(x, y, dir);
+
+  link_is_on_lower_level = bak1;
+  BYTE(dungeon_room_index) = bak0;
+}
+
+void Hookshot_CheckSingleLayerTileCollision(uint16 x, uint16 y, int dir) {  // 87d607
+  static const uint8 kHookShot_CheckColl_X[8] = { 0, 15, 0, 15, 0, 0, 8, 8 };
+  static const uint8 kHookShot_CheckColl_Y[8] = { 0, 0, 7, 7, 0, 15, 0, 15 };
+  uint16 y0 = (y + kHookShot_CheckColl_Y[dir * 2 + 0]) & tilemap_location_calc_mask;
+  uint16 y1 = (y + kHookShot_CheckColl_Y[dir * 2 + 1]) & tilemap_location_calc_mask;
+  uint16 x0 = ((x + kHookShot_CheckColl_X[dir * 2 + 0]) & tilemap_location_calc_mask) >> 3;
+  uint16 x1 = ((x + kHookShot_CheckColl_X[dir * 2 + 1]) & tilemap_location_calc_mask) >> 3;
+  TileDetection_Execute(x0, y0, 1);
+  TileDetection_Execute(x1, y1, 2);
+}
+
+void HandleNudgingInADoor(int8 speed) {  // 87d667
+  uint8 y;
+
+  if (link_last_direction_moved_towards & 2) {
+    y = (uint8)link_y_coord < 0x80 ? 1 : 0;
+  } else {
+    y = (uint8)link_x_coord < 0x80 ? 3 : 2;
+  }
+  tiledetect_pit_tile = 0;
+  TileDetect_ResetState();
+
+  static const int8 kDetectTiles_7_Y[] = { 8, 23, 16, 16 };
+  static const int8 kDetectTiles_7_X[] = { 8, 8, 0, 15 };
+
+  uint16 x0 = ((link_x_coord + kDetectTiles_7_X[y]) & tilemap_location_calc_mask) >> 3;
+  uint16 y0 = ((link_y_coord + kDetectTiles_7_Y[y]) & tilemap_location_calc_mask);
+
+  TileDetection_Execute(x0, y0, 1);
+
+  if (((R14 | detection_of_ledge_tiles_horiz_uphoriz) & 3) == 0) {
+    if (((tiledetect_vertical_ledge | detection_of_unknown_tile_types) & 0x33) == 0)
+      return;
+  }
+
+  if (link_last_direction_moved_towards & 2)
+    link_y_coord -= speed;
+  else
+    link_x_coord -= speed;
+}
+
+void TileCheckForMirrorBonk() {  // 87d6f4
+  tiledetect_pit_tile = 0;
+  TileDetect_ResetState();
+
+  uint16 x0 = ((link_x_coord + 2) & tilemap_location_calc_mask) >> 3;
+  uint16 x1 = ((link_x_coord + 13) & tilemap_location_calc_mask) >> 3;
+
+  uint16 y0 = ((link_y_coord + 10) & tilemap_location_calc_mask);
+  uint16 y1 = ((link_y_coord + 21) & tilemap_location_calc_mask);
+
+  scratch_1 = y0;
+
+  TileDetection_Execute(x0, y0, 8);
+  TileDetection_Execute(x0, y1, 2);
+  TileDetection_Execute(x1, y0, 4);
+  TileDetection_Execute(x1, y1, 1);
+
+}
+
+// Used when holding sword in doorway
+void TileDetect_SwordSwingDeepInDoor(uint8 dw) {  // 87d73e
+  tiledetect_pit_tile = 0;
+  TileDetect_ResetState();
+
+  static const int8 kDoorwayDetectX[] = { 8, 8, -1, 16 };
+  static const int8 kDoorwayDetectY[] = { -1, 24, 16, 16 };
+  int o = (dw - 1) * 2;
+  uint16 x0 = ((link_x_coord + kDoorwayDetectX[o + 0]) & tilemap_location_calc_mask) >> 3;
+  uint16 x1 = ((link_x_coord + kDoorwayDetectX[o + 1]) & tilemap_location_calc_mask) >> 3;
+
+  uint16 y0 = ((link_y_coord + kDoorwayDetectY[o + 0]) & tilemap_location_calc_mask);
+  uint16 y1 = ((link_y_coord + kDoorwayDetectY[o + 1]) & tilemap_location_calc_mask);
+
+  TileDetection_Execute(x0, y0, 1);
+  TileDetection_Execute(x1, y1, 2);
+}
+
+void TileDetect_ResetState() {  // 87d798
+  R12 = 0;
+  R14 = 0;
+  tiledetect_diagonal_tile = 0;
+  tiledetect_stair_tile = 0;
+  tiledetect_pit_tile = 0;
+  tiledetect_inroom_staircase = 0;
+  tiledetect_var2 = 0;
+  tiledetect_var1 = 0;
+  tiledetect_moving_floor_tiles = 0;
+  tiledetect_deepwater = 0;
+  tiledetect_normal_tiles = 0;
+  tiledetect_icy_floor = 0;
+  tiledetect_water_staircase = 0;
+  tiledetect_thick_grass = 0;
+  tiledetect_shallow_water = 0;
+  tiledetect_destruction_aftermath = 0;
+  tiledetect_read_something = 0;
+  tiledetect_vertical_ledge = 0;
+  detection_of_ledge_tiles_horiz_uphoriz = 0;
+  tiledetect_ledges_down_leftright = 0;
+  detection_of_unknown_tile_types = 0;
+  tiledetect_chest = 0;
+  tiledetect_key_lock_gravestones = 0;
+  bitfield_spike_cactus_tiles = 0;
+  tiledetect_spike_floor_and_tile_triggers = 0;
+  bitmask_for_dashable_tiles = 0;
+  tiledetect_misc_tiles = 0;
+  tiledetect_var4 = 0;
+}
+
+void TileDetection_Execute(uint16 x, uint16 y, uint16 bits) {  // 87d9d8
+  uint8 tile;
+  uint16 offs = 0;
+  if (player_is_indoors) {
+    force_move_any_direction = force_move_any_direction & 0xff;
+    offs = (y & ~7) * 8 + (x & 63) + (link_is_on_lower_level ? 0x1000 : 0);
+    tile = dung_bg2_attr_table[offs];
+    if (cheatWalkThroughWalls)
+      tile = 0;
+    link_tile_below = tile;
+  } else {
+    tile = Overworld_GetTileAttributeAtLocation(x, y);
+  }
+  TileDetect_ExecuteInner(tile, offs, bits, player_is_indoors);
+}
+
+void TileDetect_ExecuteInner(uint8 tile, uint16 offs, uint16 bits, bool is_indoors) {  // 87dc2e
   static const uint8 word_87DC55[] = { 4, 0, 6, 2 };
   if (cheatWalkThroughWalls)
     tile = 0;
@@ -297,239 +523,5 @@ void TileDetect_ExecuteInner(uint8 tile, uint16 offs, uint16 bits, bool is_indoo
   default:
     assert(0);
   }
-}
-
-void TileDetection_Execute(uint16 x, uint16 y, uint16 bits) {
-  uint8 tile;
-  uint16 offs = 0;
-  if (player_is_indoors) {
-    force_move_any_direction = force_move_any_direction & 0xff;
-    offs = (y & ~7) * 8 + (x & 63) + (link_is_on_lower_level ? 0x1000 : 0);
-    tile = dung_bg2_attr_table[offs];
-    if (cheatWalkThroughWalls)
-      tile = 0;
-    link_tile_below = tile;
-  } else {
-    tile = Overworld_GetTileAttributeAtLocation(x, y);
-  }
-  TileDetect_ExecuteInner(tile, offs, bits, player_is_indoors);
-}
-
-void TileDetect_ResetState() {
-  R12 = 0;
-  R14 = 0;
-  tiledetect_diagonal_tile = 0;
-  tiledetect_stair_tile = 0;
-  tiledetect_pit_tile = 0;
-  tiledetect_inroom_staircase = 0;
-  tiledetect_var2 = 0;
-  tiledetect_var1 = 0;
-  tiledetect_moving_floor_tiles = 0;
-  tiledetect_deepwater = 0;
-  tiledetect_normal_tiles = 0;
-  tiledetect_icy_floor = 0;
-  tiledetect_water_staircase = 0;
-  tiledetect_thick_grass = 0;
-  tiledetect_shallow_water = 0;
-  tiledetect_destruction_aftermath = 0;
-  tiledetect_read_something = 0;
-  tiledetect_vertical_ledge = 0;
-  detection_of_ledge_tiles_horiz_uphoriz = 0;
-  tiledetect_ledges_down_leftright = 0;
-  detection_of_unknown_tile_types = 0;
-  tiledetect_chest = 0;
-  tiledetect_key_lock_gravestones = 0;
-  bitfield_spike_cactus_tiles = 0;
-  tiledetect_spike_floor_and_tile_triggers = 0;
-  bitmask_for_dashable_tiles = 0;
-  tiledetect_misc_tiles = 0;
-  tiledetect_var4 = 0;
-}
-
-static const uint8 kDetectTiles_tab0[] = { 8, 24, 0, 15 };
-static const uint8 kDetectTiles_tab1[] = { 0, 0, 8, 8 };
-static const uint8 kDetectTiles_tab2[] = { 8, 8, 16, 16 };
-static const uint8 kDetectTiles_tab3[] = { 15, 15, 23, 23 };
-
-void TileDetect_Movement_X(uint16 direction) {
-  assert(direction < 4);
-  TileDetect_ResetState();
-  tiledetect_pit_tile = 0;
-
-  uint16 x = ((link_x_coord + kDetectTiles_tab0[direction]) & tilemap_location_calc_mask) >> 3;
-  uint16 y0 = ((link_y_coord + kDetectTiles_tab1[direction]) & tilemap_location_calc_mask);
-  tiledetect_which_y_pos[0] = link_y_coord + kDetectTiles_tab2[direction];
-  uint16 y1 = tiledetect_which_y_pos[0] & tilemap_location_calc_mask;
-  tiledetect_which_y_pos[1] = link_y_coord + kDetectTiles_tab3[direction];
-  uint16 y2 = tiledetect_which_y_pos[1] & tilemap_location_calc_mask;
-  TileDetection_Execute(x, y0, 1);
-  TileDetection_Execute(x, y1, 2);
-  TileDetection_Execute(x, y2, 4);
-}
-
-void TileDetect_Movement_Y(uint16 direction) {
-  assert(direction < 4);
-  TileDetect_ResetState();
-  tiledetect_pit_tile = 0;
-
-  tiledetect_which_y_pos[0] = (link_y_coord + kDetectTiles_tab0[direction]);
-  uint16 y = tiledetect_which_y_pos[0] & tilemap_location_calc_mask;
-  uint16 x0 = ((link_x_coord + kDetectTiles_tab1[direction]) & tilemap_location_calc_mask) >> 3;
-  uint16 x1 = ((link_x_coord + kDetectTiles_tab2[direction]) & tilemap_location_calc_mask) >> 3;
-  uint16 x2 = ((link_x_coord + kDetectTiles_tab3[direction]) & tilemap_location_calc_mask) >> 3;
-  scratch_1 = x2;
-  TileDetection_Execute(x0, y, 1);
-  TileDetection_Execute(x1, y, 2);
-  TileDetection_Execute(x2, y, 4);
-}
-
-static const int8 kDetectTiles_tab4[] = { 7, 24, -1, 16 };
-static const uint8 kDetectTiles_tab5[] = { 0, 0, 8, 8 };
-static const uint8 kDetectTiles_tab6[] = { 15, 15, 23, 23 };
-
-void TileDetect_Movement_VerticalSlopes(uint16_t direction) {
-  assert(direction < 4);
-  TileDetect_ResetState();
-  tiledetect_pit_tile = 0;
-
-  uint16 y = (link_y_coord + kDetectTiles_tab4[direction]) & tilemap_location_calc_mask;
-  uint16 x0 = ((link_x_coord + kDetectTiles_tab5[direction]) & tilemap_location_calc_mask) >> 3;
-  uint16 x1 = ((link_x_coord + kDetectTiles_tab6[direction]) & tilemap_location_calc_mask) >> 3;
-  TileDetection_Execute(x0, y, 1);
-  TileDetection_Execute(x1, y, 2);
-}
-
-void TileDetect_Movement_HorizontalSlopes(uint16_t direction) {
-  assert(direction < 4);
-  TileDetect_ResetState();
-  tiledetect_pit_tile = 0;
-
-  uint16 x = ((link_x_coord + kDetectTiles_tab4[direction]) & tilemap_location_calc_mask) >> 3;
-  uint16 y0 = ((link_y_coord + kDetectTiles_tab5[direction]) & tilemap_location_calc_mask);
-  uint16 y1 = ((link_y_coord + kDetectTiles_tab6[direction]) & tilemap_location_calc_mask);
-  TileDetection_Execute(x, y0, 1);
-  TileDetection_Execute(x, y1, 2);
-}
-
-void Player_TileDetectNearby() {
-  TileDetect_ResetState();
-  tiledetect_pit_tile = 0;
-
-  uint16 x0 = ((link_x_coord + kDetectTiles_tab1[0]) & tilemap_location_calc_mask) >> 3;
-  uint16 x1 = ((link_x_coord + kDetectTiles_tab3[0]) & tilemap_location_calc_mask) >> 3;
-
-  uint16 y0 = ((link_y_coord + kDetectTiles_tab1[2]) & tilemap_location_calc_mask);
-  uint16 y1 = ((link_y_coord + kDetectTiles_tab3[2]) & tilemap_location_calc_mask);
-
-  scratch_1 = y0;
-
-  TileDetection_Execute(x0, y0, 8);
-  TileDetection_Execute(x0, y1, 2);
-  TileDetection_Execute(x1, y0, 4);
-  TileDetection_Execute(x1, y1, 1);
-}
-
-void Hookshot_CheckSingleLayerTileCollision(uint16 x, uint16 y, int dir) {
-  static const uint8 kHookShot_CheckColl_X[8] = { 0, 15, 0, 15, 0, 0, 8, 8 };
-  static const uint8 kHookShot_CheckColl_Y[8] = { 0, 0, 7, 7, 0, 15, 0, 15 };
-  uint16 y0 = (y + kHookShot_CheckColl_Y[dir * 2 + 0]) & tilemap_location_calc_mask;
-  uint16 y1 = (y + kHookShot_CheckColl_Y[dir * 2 + 1]) & tilemap_location_calc_mask;
-  uint16 x0 = ((x + kHookShot_CheckColl_X[dir * 2 + 0]) & tilemap_location_calc_mask) >> 3;
-  uint16 x1 = ((x + kHookShot_CheckColl_X[dir * 2 + 1]) & tilemap_location_calc_mask) >> 3;
-  TileDetection_Execute(x0, y0, 1);
-  TileDetection_Execute(x1, y1, 2);
-}
-
-void Hookshot_CheckTileCollision(int k) {
-  uint8 bak0 = BYTE(dungeon_room_index);
-  uint8 bak1 = link_is_on_lower_level;
-
-  if (ancilla_arr1[k]) {
-    if (!BYTE(kind_of_in_room_staircase))
-      BYTE(dungeon_room_index) += 0x10;
-    link_is_on_lower_level ^= 1;
-  }
-
-  uint16 x = Ancilla_GetX(k), y = Ancilla_GetY(k);
-  int dir = ancilla_dir[k];
-
-  tiledetect_pit_tile = 0;
-  TileDetect_ResetState();
-  if (dung_hdr_collision == 2) {
-    link_is_on_lower_level = 1;
-    Hookshot_CheckSingleLayerTileCollision(x + BG1HOFS_copy2 - BG2HOFS_copy2, y + BG1VOFS_copy2 - BG2VOFS_copy2, dir);
-    link_is_on_lower_level = 0;
-  }
-  Hookshot_CheckSingleLayerTileCollision(x, y, dir);
-
-  link_is_on_lower_level = bak1;
-  BYTE(dungeon_room_index) = bak0;
-}
-
-void HandleNudgingInADoor(int8 speed) {
-  uint8 y;
-
-  if (link_last_direction_moved_towards & 2) {
-    y = (uint8)link_y_coord < 0x80 ? 1 : 0;
-  } else {
-    y = (uint8)link_x_coord < 0x80 ? 3 : 2;
-  }
-  tiledetect_pit_tile = 0;
-  TileDetect_ResetState();
-
-  static const int8 kDetectTiles_7_Y[] = { 8, 23, 16, 16 };
-  static const int8 kDetectTiles_7_X[] = { 8, 8, 0, 15 };
-
-  uint16 x0 = ((link_x_coord + kDetectTiles_7_X[y]) & tilemap_location_calc_mask) >> 3;
-  uint16 y0 = ((link_y_coord + kDetectTiles_7_Y[y]) & tilemap_location_calc_mask);
-
-  TileDetection_Execute(x0, y0, 1);
-
-  if (((R14 | detection_of_ledge_tiles_horiz_uphoriz) & 3) == 0) {
-    if (((tiledetect_vertical_ledge | detection_of_unknown_tile_types) & 0x33) == 0)
-      return;
-  }
-
-  if (link_last_direction_moved_towards & 2)
-    link_y_coord -= speed;
-  else
-    link_x_coord -= speed;
-}
-
-void TileCheckForMirrorBonk() {
-  tiledetect_pit_tile = 0;
-  TileDetect_ResetState();
-
-  uint16 x0 = ((link_x_coord + 2) & tilemap_location_calc_mask) >> 3;
-  uint16 x1 = ((link_x_coord + 13) & tilemap_location_calc_mask) >> 3;
-
-  uint16 y0 = ((link_y_coord + 10) & tilemap_location_calc_mask);
-  uint16 y1 = ((link_y_coord + 21) & tilemap_location_calc_mask);
-
-  scratch_1 = y0;
-
-  TileDetection_Execute(x0, y0, 8);
-  TileDetection_Execute(x0, y1, 2);
-  TileDetection_Execute(x1, y0, 4);
-  TileDetection_Execute(x1, y1, 1);
-
-}
-
-// Used when holding sword in doorway
-void TileDetect_SwordSwingDeepInDoor(uint8 dw) {
-  tiledetect_pit_tile = 0;
-  TileDetect_ResetState();
-
-  static const int8 kDoorwayDetectX[] = { 8, 8, -1, 16 };
-  static const int8 kDoorwayDetectY[] = { -1, 24, 16, 16 };
-  int o = (dw - 1) * 2;
-  uint16 x0 = ((link_x_coord + kDoorwayDetectX[o + 0]) & tilemap_location_calc_mask) >> 3;
-  uint16 x1 = ((link_x_coord + kDoorwayDetectX[o + 1]) & tilemap_location_calc_mask) >> 3;
-
-  uint16 y0 = ((link_y_coord + kDoorwayDetectY[o + 0]) & tilemap_location_calc_mask);
-  uint16 y1 = ((link_y_coord + kDoorwayDetectY[o + 1]) & tilemap_location_calc_mask);
-
-  TileDetection_Execute(x0, y0, 1);
-  TileDetection_Execute(x1, y1, 2);
 }
 

@@ -22,32 +22,16 @@ extern ZeldaEnv g_zenv;
 // it's here so that the variables.h can access it
 extern uint8 g_ram[131072];
 
-void ZeldaRunGameLoop();
-void ZeldaInitialize();
 
 
 static inline void zelda_snes_dummy_write(uint32_t adr, uint8_t val) {}
 
-uint16 snes_divide(uint16 dividend, uint8 divisor);
-void zelda_apu_runcycles();
 
-void zelda_ppu_write(uint32_t adr, uint8_t val);
-void zelda_ppu_write_word(uint32_t adr, uint16_t val);
 
-void zelda_apu_write(uint32_t adr, uint8_t val);
-void zelda_apu_write_word(uint32_t adr, uint16_t val);
 
-uint8_t zelda_apu_read(uint32_t adr);
-uint16_t zelda_apu_read_word(uint32_t adr);
 
-uint8_t zelda_read_apui00();
 
-void HdmaSetup(uint32 addr6, uint32 addr7, uint8 transfer_unit, uint8 reg6, uint8 reg7, uint8 indirect_bank);
-void ZeldaDrawPpuFrame();
-void ZeldaRunFrame(uint16 input);
-void LoadSongBank(const uint8 *p);
 
-void RunEmulatedFunc(uint32 pc, uint16 a, uint16 x, uint16 y, bool mf, bool xf, int b, int whatflags);
 
 
 const uint16 kUpperBitmasks[] = { 0x8000, 0x4000, 0x2000, 0x1000, 0x800, 0x400, 0x200, 0x100, 0x80, 0x40, 0x20, 0x10, 8, 4, 2, 1 };
@@ -72,17 +56,7 @@ struct OamEntSigned {
 #define oam_buf ((OamEnt*)(g_ram+0x800))
 
 
-struct RoomBounds {
-  union {
-    struct {
-      uint16 a0, b0, a1, b1;
-    };
-    uint16 v[4];
-  };
-};
 
-#define room_bounds_y (*(RoomBounds*)(g_ram+0x600))
-#define room_bounds_x (*(RoomBounds*)(g_ram+0x608))
 
 struct OwScrollVars {
   uint16 ystart, yend, xstart, xend;
@@ -95,8 +69,6 @@ struct OwScrollVars {
 
 
 
-typedef void PlayerHandlerFunc();
-typedef void HandlerFuncK(int k);
 
 extern const uint8 kLayoutQuadrantFlags[];
 extern const uint8 kVariousPacks[16];
@@ -109,8 +81,6 @@ extern const uint16 kOverworld_OffsetBaseY[64];
 extern const uint16 kOverworld_OffsetBaseX[64];
 
 // forwards
-void TriforceRoom_LinkApproachTriforce();
-void Dungeon_LightTorch();
 
 
 struct MirrorHdmaVars {
@@ -130,10 +100,7 @@ struct MirrorHdmaVars {
 
 
 // Various level tables
-const uint16 *GetMap16toMap8Table();
-const uint16 *GetFontPtr();
 
-const uint8 *GetMap8toTileAttr();
 
 #define scratch_0 (*(uint16*)(g_ram+0x72))
 #define scratch_1 (*(uint16*)(g_ram+0x74))
@@ -210,3 +177,21 @@ const uint8 *GetMap8toTileAttr();
 #define R18 (*(uint16*)(g_ram+0xca))
 #define R20 (*(uint16*)(g_ram+0xcc))
 
+void zelda_apu_write(uint32_t adr, uint8_t val);
+void zelda_apu_write_word(uint32_t adr, uint16_t val);
+uint8_t zelda_read_apui00();
+uint8_t zelda_apu_read(uint32_t adr);
+uint16_t zelda_apu_read_word(uint32_t adr);
+void zelda_ppu_write(uint32_t adr, uint8_t val);
+void zelda_ppu_write_word(uint32_t adr, uint16_t val);
+void zelda_apu_runcycles();
+const uint8 *SimpleHdma_GetPtr(uint32 p);
+void ZeldaDrawPpuFrame();
+void HdmaSetup(uint32 addr6, uint32 addr7, uint8 transfer_unit, uint8 reg6, uint8 reg7, uint8 indirect_bank);
+void ZeldaInitializationCode();
+void ZeldaRunGameLoop();
+void ZeldaInitialize();
+void ZeldaRunFrame(uint16 input);
+void ClearOamBuffer();
+void Startup_InitializeMemory();
+void LoadSongBank(const uint8 *p);

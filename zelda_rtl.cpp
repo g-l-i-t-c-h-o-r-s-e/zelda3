@@ -10,7 +10,42 @@
 ZeldaEnv g_zenv;
 // These point to the rewritten instance of the emu.
 uint8 g_ram[131072];
+struct SimpleHdma {
+  const uint8 *table;
+  const uint8 *indir_ptr;
+  uint8 rep_count;
+  uint8 mode;
+  uint8 ppu_addr;
+  uint8 indir_bank;
+};
+void SimpleHdma_Init(SimpleHdma *c, DmaChannel *dc);
+void SimpleHdma_DoLine(SimpleHdma *c);
 
+static const uint8 bAdrOffsets[8][4] = {
+  {0, 0, 0, 0},
+  {0, 1, 0, 1},
+  {0, 0, 0, 0},
+  {0, 0, 1, 1},
+  {0, 1, 2, 3},
+  {0, 1, 0, 1},
+  {0, 0, 0, 0},
+  {0, 0, 1, 1}
+};
+static const uint8 transferLength[8] = {
+  1, 2, 2, 4, 4, 4, 2, 4
+};
+#define AT_WORD(x) (uint8)(x), (x)>>8
+// direct
+static const uint8 kAttractDmaTable0[13] = {0x20, AT_WORD(0x00ff), 0x50, AT_WORD(0xe018), 0x50, AT_WORD(0xe018), 1, AT_WORD(0x00ff), 0};
+static const uint8 kAttractDmaTable1[10] = {0x48, AT_WORD(0x00ff), 0x30, AT_WORD(0xd830), 1, AT_WORD(0x00ff), 0};
+static const uint8 kHdmaTableForEnding[19] = {
+  0x52, AT_WORD(0x600), 8, AT_WORD(0xe2), 8, AT_WORD(0x602), 5, AT_WORD(0x604), 0x10, AT_WORD(0x606), 0x81, AT_WORD(0xe2), 0,
+};
+static const uint8 kSpotlightIndirectHdma[7] = {0xf8, AT_WORD(0x1b00), 0xf8, AT_WORD(0x1bf0), 0};
+static const uint8 kMapModeHdma0[7] = {0xf0, AT_WORD(0xdd27), 0xf0, AT_WORD(0xde07), 0};
+static const uint8 kMapModeHdma1[7] = {0xf0, AT_WORD(0xdee7), 0xf0, AT_WORD(0xdfc7), 0};
+static const uint8 kAttractIndirectHdmaTab[7] = {0xf0, AT_WORD(0x1b00), 0xf0, AT_WORD(0x1be0), 0};
+static const uint8 kHdmaTableForPrayingScene[7] = {0xf8, AT_WORD(0x1b00), 0xf8, AT_WORD(0x1bf0), 0};
 void zelda_apu_write(uint32_t adr, uint8_t val) {
   assert(adr >= APUI00 && adr <= APUI03);
   g_zenv.player->input_ports[adr & 0x3] = val;
@@ -32,6 +67,7 @@ uint8_t zelda_read_apui00() {
 uint8_t zelda_apu_read(uint32_t adr) {
   return g_zenv.player->port_to_snes[adr & 0x3];
 }
+
 uint16_t zelda_apu_read_word(uint32_t adr) {
   uint16_t rv = zelda_apu_read(adr);
   rv |= zelda_apu_read(adr + 1) << 8;
@@ -48,55 +84,13 @@ void zelda_ppu_write_word(uint32_t adr, uint16_t val) {
   zelda_ppu_write(adr + 1, val >> 8);
 }
 
-void LoadSongBank(const uint8 *p) {
-  SpcPlayer_Upload(g_zenv.player, p);
-}
-
 void zelda_apu_runcycles() {
 //  apu_cycle(g_zenv.apu);
 }
 
-struct SimpleHdma {
-  const uint8 *table;
-  const uint8 *indir_ptr;
-  uint8 rep_count;
-  uint8 mode;
-  uint8 ppu_addr;
-  uint8 indir_bank;
-};
-
-static const uint8 bAdrOffsets[8][4] = {
-  {0, 0, 0, 0},
-  {0, 1, 0, 1},
-  {0, 0, 0, 0},
-  {0, 0, 1, 1},
-  {0, 1, 2, 3},
-  {0, 1, 0, 1},
-  {0, 0, 0, 0},
-  {0, 0, 1, 1}
-};
-
-static const uint8 transferLength[8] = {
-  1, 2, 2, 4, 4, 4, 2, 4
-};
-
-#define AT_WORD(x) (uint8)(x), (x)>>8
-
-// direct
-static const uint8 kAttractDmaTable0[13] = {0x20, AT_WORD(0x00ff), 0x50, AT_WORD(0xe018), 0x50, AT_WORD(0xe018), 1, AT_WORD(0x00ff), 0};
-static const uint8 kAttractDmaTable1[10] = {0x48, AT_WORD(0x00ff), 0x30, AT_WORD(0xd830), 1, AT_WORD(0x00ff), 0};
-static const uint8 kHdmaTableForEnding[19] = {
-  0x52, AT_WORD(0x600), 8, AT_WORD(0xe2), 8, AT_WORD(0x602), 5, AT_WORD(0x604), 0x10, AT_WORD(0x606), 0x81, AT_WORD(0xe2), 0, 
-};
-static const uint8 kSpotlightIndirectHdma[7] = {0xf8, AT_WORD(0x1b00), 0xf8, AT_WORD(0x1bf0), 0};
-static const uint8 kMapModeHdma0[7] = {0xf0, AT_WORD(0xdd27), 0xf0, AT_WORD(0xde07), 0};
-static const uint8 kMapModeHdma1[7] = {0xf0, AT_WORD(0xdee7), 0xf0, AT_WORD(0xdfc7), 0};
-static const uint8 kAttractIndirectHdmaTab[7] = {0xf0, AT_WORD(0x1b00), 0xf0, AT_WORD(0x1be0), 0};
-static const uint8 kHdmaTableForPrayingScene[7] = {0xf8, AT_WORD(0x1b00), 0xf8, AT_WORD(0x1bf0), 0};
-
 const uint8 *SimpleHdma_GetPtr(uint32 p) {
   switch (p) {
-    
+
   case 0xCFA87: return kAttractDmaTable0;
   case 0xCFA94: return kAttractDmaTable1;
   case 0xebd53: return kHdmaTableForEnding;
@@ -161,7 +155,6 @@ void SimpleHdma_DoLine(SimpleHdma *c) {
   c->rep_count--;
 }
 
-
 void ZeldaDrawPpuFrame() {
   SimpleHdma hdma_chans[2];
 
@@ -187,7 +180,6 @@ void ZeldaDrawPpuFrame() {
   }
 }
 
-
 void HdmaSetup(uint32 addr6, uint32 addr7, uint8 transfer_unit, uint8 reg6, uint8 reg7, uint8 indirect_bank) {
   struct Dma *dma = g_zenv.dma;
   if (addr6) {
@@ -204,22 +196,6 @@ void HdmaSetup(uint32 addr6, uint32 addr7, uint8 transfer_unit, uint8 reg6, uint
   dma_write(dma, A1T7H, addr7 >> 8);
   dma_write(dma, A1B7, addr7 >> 16);
   dma_write(dma, DAS70, indirect_bank);
-}
-
-void Startup_InitializeMemory() {
-  memset(g_ram + 0x0, 0, 0x2000);
-  main_palette_buffer[0] = 0;
-  srm_var1 = 0;
-  uint8 *sram = g_zenv.sram;
-  if (WORD(sram[0x3e5]) != 0x55aa)
-    WORD(sram[0x3e5]) = 0;
-  if (WORD(sram[0x8e5]) != 0x55aa)
-    WORD(sram[0x8e5]) = 0;
-  if (WORD(sram[0xde5]) != 0x55aa)
-    WORD(sram[0xde5]) = 0;
-  zelda_ppu_write(TMW, 0);
-  INIDISP_copy = 0x80;
-  flag_update_cgram_in_nmi++;
 }
 
 void ZeldaInitializationCode() {
@@ -239,11 +215,6 @@ void ZeldaInitializationCode() {
   dma_source_addr_9 = 0xb280;
   dma_source_addr_14 = 0xb280 + 0x60;
   zelda_snes_dummy_write(NMITIMEN, 0x81);
-}
-
-void ClearOamBuffer() {
-  for (int i = 0; i < 128; i++)
-    oam_buf[i].y = 0xf0;
 }
 
 void ZeldaRunGameLoop() {
@@ -282,5 +253,30 @@ void ZeldaRunFrame(uint16 input) {
   }
 
   Interrupt_NMI(input);
+}
+
+void ClearOamBuffer() {  // 80841e
+  for (int i = 0; i < 128; i++)
+    oam_buf[i].y = 0xf0;
+}
+
+void Startup_InitializeMemory() {  // 8087c0
+  memset(g_ram + 0x0, 0, 0x2000);
+  main_palette_buffer[0] = 0;
+  srm_var1 = 0;
+  uint8 *sram = g_zenv.sram;
+  if (WORD(sram[0x3e5]) != 0x55aa)
+    WORD(sram[0x3e5]) = 0;
+  if (WORD(sram[0x8e5]) != 0x55aa)
+    WORD(sram[0x8e5]) = 0;
+  if (WORD(sram[0xde5]) != 0x55aa)
+    WORD(sram[0xde5]) = 0;
+  zelda_ppu_write(TMW, 0);
+  INIDISP_copy = 0x80;
+  flag_update_cgram_in_nmi++;
+}
+
+void LoadSongBank(const uint8 *p) {  // 808888
+  SpcPlayer_Upload(g_zenv.player, p);
 }
 

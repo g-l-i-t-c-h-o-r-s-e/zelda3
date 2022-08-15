@@ -10,151 +10,254 @@
 #include "messaging.h"
 #include "player_oam.h"
 #include "tables/generated_ending.h"
+#include "sprite_main.h"
+
 static const uint16 kPolyhedralPalette[8] = { 0, 0x14d, 0x1b0, 0x1f3, 0x256, 0x279, 0x2fd, 0x35f };
-void Scene_AnimateEverySprite();
 
 #define ending_which_dung (*(uint16*)(g_ram+0xcc))
-
-
 #define kPolyThreadRam (g_ram + 0x1f00)
-void Polyhedral_InitializeThread() {
-  static const uint8 kPolyThreadInit[13] = { 9, 0, 0x1f, 0, 0, 0, 0, 0, 0, 0x30, 0x1d, 0xf8, 9 };
-  memset(kPolyThreadRam, 0, 256);
-  thread_other_stack = 0x1f31;
-  memcpy(&g_ram[0x1f32], kPolyThreadInit, 13);
-}
-
-void CrystalCutscene_InitializePolyhedral() {
-  poly_config1 = 156;
-  poly_config_color_mode = 1;
-  is_nmi_thread_active = 1;
-  intro_did_run_step = 1;
-  poly_base_x = 32;
-  poly_base_y = 32;
-  BYTE(poly_var1) = 32;
-  poly_which_model = 0;
-  poly_a = 16;
+static const int8 kIntroSprite0_Xvel[3] = { 1, 0, -1 };
+static const int8 kIntroSprite0_Yvel[3] = { -1, 1, -1 };
+static const uint8 kIntroSprite3_X[4] = { 0xc2, 0x98, 0x6f, 0x34 };
+static const uint8 kIntroSprite3_Y[4] = { 0x7c, 0x54, 0x7c, 0x57 };
+static const uint8 kIntroSprite3_State[8] = { 0, 1, 2, 3, 2, 1, 0xff, 0xff };
+static const uint8 kTriforce_Xfinal[3] = { 0x59, 0x5f, 0x67 };
+static const uint8 kTriforce_Yfinal[3] = { 0x74, 0x68, 0x74 };
+static const uint16 kEndingSprites_X[] = {
+  0x1e0, 0x200, 0x1ed, 0x203, 0x1da, 0x216, 0x1c8, 0x228, 0x1c0, 0x1e0, 0x208, 0x228,
+  0xf8, 0xf0,
+  0x278, 0x298, 0x1e0, 0x200, 0x220, 0x288, 0x1e2,
+  0xe0, 0x150, 0xe8, 0x168, 0x128, 0x170, 0x170,
+  0x335, 0x335, 0x300,
+  0xb8, 0xce, 0xac, 0xc4,
+  0x3b0, 0x390, 0x3d0,
+  0xf8, 0xc8,
+  0x80,
+  0xf8, 0xf8, 0xf8, 0xf8, 0xf8, 0xe8, 0xf8, 0xd8, 0xf8, 0xc8, 0x108,
+  0x70, 0x70, 0x70, 0x68, 0x88, 0x70,
+  0x40, 0x70, 0x4f, 0x61, 0x37, 0x79,
+  0xc8, 0x278, 0x258, 0x1d8, 0x1c8, 0x188, 0x270,
+  0x180,
+  0x2e8, 0x270, 0x270, 0x2a0, 0x2a0, 0x2a4, 0x2fc,
+  0x76, 0x73, 0x76, 0x0, 0xd0, 0x80,
+};
+static const uint16 kEndingSprites_Y[] = {
+  0x158, 0x158, 0x138, 0x138, 0x140, 0x140, 0x150, 0x150, 0x120, 0x120, 0x120, 0x120,
+  0x60, 0x37,
+  0xc2, 0xc2, 0x16b, 0x16c, 0x16b, 0xb8, 0x16b,
+  0x80, 0x60, 0x146, 0x146, 0x1c6, 0x70, 0x70,
+  0x128, 0x128, 0x16f,
+  0xf5, 0xfc, 0x10d, 0x10d,
+  0x40, 0x40, 0x40,
+  0x150, 0x158,
+  0xf4,
+  0x120, 0x120, 0x120, 0x120, 0x120, 0x108, 0x100, 0xd8, 0xd8, 0xf0, 0xf0,
+  0x3c, 0x3c, 0x3c, 0x90, 0x80, 0x3c,
+  0x16c, 0x16c, 0x174, 0x174, 0x175, 0x175,
+  0x250, 0x2b0, 0x2b0, 0x2a0, 0x2b0, 0x2b0, 0x2b8,
+  0xd8,
+  0x24b, 0x1b0, 0x1c8, 0x1c8, 0x1b0, 0x230, 0x230,
+  0x8b, 0x83, 0x85, 0x2c, 0xf8, 0x100,
+};
+static const uint8 kEndingSprites_Idx[17] = {
+  0, 12, 14, 21, 28, 31, 35, 38, 40, 41, 52, 58, 64, 71, 72, 79, 85
+};
+static PlayerHandlerFunc *const kEndSequence0_Funcs[3] = {
+&Credits_LoadScene_Overworld_PrepGFX,
+&Credits_LoadScene_Overworld_Overlay,
+&Credits_LoadScene_Overworld_LoadMap,
+};
+static PrepOamCoordsRet g_ending_coords;
+static const uint16 kEnding1_TargetScrollY[16] = { 0x6f2, 0x210, 0x72c, 0xc00, 0x10c, 0xa9b, 0x10, 0x510, 0x89, 0xa8e, 0x222c, 0x2510, 0x826, 0x5c, 0x20a, 0x30 };
+static const uint16 kEnding1_TargetScrollX[16] = { 0x77f, 0x480, 0x193, 0xaa, 0x878, 0x847, 0x4fd, 0xc57, 0x40f, 0x478, 0xa00, 0x200, 0x201, 0xaa1, 0x26f, 0 };
+static const int8 kEnding1_Yvel[16] = { -1, -1, 1, -1, 1, 1, 0, 1, 0, -1, -1, 0, 0, 0, 1, -1 };
+static const int8 kEnding1_Xvel[16] = { 0, 0, -1, 0, 0, -1, 1, 0, -1, 0, 0, 0, 1, -1, 1, 0 };
+static PlayerHandlerFunc *const kEndSequence_Funcs[39] = {
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&Credits_LoadNextScene_Dungeon,
+&Credits_ScrollScene_Dungeon,
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&Credits_LoadNextScene_Dungeon,
+&Credits_ScrollScene_Dungeon,
+&Credits_LoadNextScene_Dungeon,
+&Credits_ScrollScene_Dungeon,
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&Credits_LoadNextScene_Overworld,
+&Credits_ScrollScene_Overworld,
+&EndSequence_32,
+&Credits_BrightenTriangles,
+&Credits_FadeColorAndBeginAnimating,
+&Credits_StopCreditsScroll,
+&Credits_FadeAndDisperseTriangles,
+&Credits_FadeInTheEnd,
+&Credits_HangForever,
+};
+#define intro_sword_ypos WORD(g_ram[0xc8])
+#define intro_sword_18 g_ram[0xca]
+#define intro_sword_19 g_ram[0xcb]
+#define intro_sword_20 g_ram[0xcc]
+#define intro_sword_21 g_ram[0xcd]
+#define intro_sword_24 g_ram[0xd0]
+static const uint16 kEnding_Tab1[16] = {
+  0x1000, 2, 0x1002, 0x1012, 0x1004, 0x1006, 0x1010, 0x1014, 0x100a,
+  0x1016, 0x5d, 0x64, 0x100e, 0x1008, 0x1018, 0x180 };
+static const uint8 kEnding_SpritePack[17] = {
+  0x28, 0x46, 0x27, 0x2e, 0x2b, 0x2b, 0xe, 0x2c, 0x1a, 0x29, 0x47, 0x28, 0x27, 0x28, 0x2a, 0x28, 0x2d,
+};
+static const uint8 kEnding_SpritePal[17] = {
+  1, 0x40, 1, 4, 1, 1, 1, 0x11, 1, 1, 0x47, 0x40, 1, 1, 1, 1, 1,
+};
+void Intro_SetupScreen() {  // 828000
+  nmi_disable_core_updates = 0x80;
+  EnableForceBlank();
+  TM_copy = 16;
   TS_copy = 0;
-  TM_copy = 0x16;
+  Intro_InitializeBackgroundSettings();
+  CGWSEL_copy = 32;
+  zelda_ppu_write(OBSEL, 2);
+  load_chr_halfslot_even_odd = 20;
+  Graphics_LoadChrHalfSlot();
+  load_chr_halfslot_even_odd = 0;
+  LoadOWMusicIfNeeded();
+
+  zelda_ppu_write(VMAIN, 0x80);
+  zelda_ppu_write_word(VMADDL, 0x27f0);
+  int i = 16;
+  do {
+    zelda_ppu_write_word(VMDATAL, 0);
+    main_palette_buffer[144 + i] = 0x7fff;
+  } while (--i >= 0);
+  R16 = 0x1ffe;
+  R18 = 0x1bfe;
 }
 
-void LoadTriforceSpritePalette() {
-  memcpy(main_palette_buffer + 0xd0, kPolyhedralPalette, 16);
-  flag_update_cgram_in_nmi++;
+void Intro_LoadTextPointersAndPalettes() {  // 828116
+  Text_GenerateMessagePointers();
+  Overworld_LoadAllPalettes();
 }
 
-void Intro_InitGfx_Helper() {
-  Polyhedral_InitializeThread();
-  LoadTriforceSpritePalette();
-  virq_trigger = 0x90;
-  poly_config1 = 255;
-  poly_base_x = 32;
-  poly_base_y = 32;
-  BYTE(poly_var1) = 32;
-  poly_a = 0xA0;
-  poly_b = 0x60;
-  poly_config_color_mode = 1;
-  poly_which_model = 1;
-  is_nmi_thread_active = 1;
-  intro_did_run_step = 1;
-  memset(&intro_step_index, 0, 7 * 16);
+void Credits_LoadScene_Overworld_PrepGFX() {  // 828604
+  EnableForceBlank();
+  EraseTileMaps_normal();
+  CGWSEL_copy = 0x82;
+  int k = submodule_index >> 1;
+  dungeon_room_index = kEnding_Tab1[k];
+
+  if (k != 6 && k != 15)
+    LoadOverworldFromDungeon();
+  else
+    Overworld_EnterSpecialArea();
+  music_control = 0;
+  sound_effect_ambient = 0;
+
+  int t = BYTE(overworld_screen_index) & ~0x40;
+  DecompressAnimatedOverworldTiles((t == 3 || t == 5 || t == 7) ? 0x58 : 0x5a);
+
+  k = submodule_index >> 1;
+  sprite_graphics_index = kEnding_SpritePack[k];
+  uint8 sprpal = kEnding_SpritePal[k];
+  InitializeTilesets();
+  OverworldLoadScreensPaletteSet();
+  Overworld_LoadPalettes(GetOverworldBgPalette(BYTE(overworld_screen_index)), sprpal);
+
+  hud_palette = 1;
+  Palette_Load_HUD();
+  if (!submodule_index)
+    TransferFontToVRAM();
+  Overworld_LoadPalettesInner();
+  Overworld_SetFixedColAndScroll();
+  if (BYTE(overworld_screen_index) >= 128)
+    Palette_SetOwBgColor();
+  BGMODE_copy = 9;
+  subsubmodule_index++;
 }
 
-void Intro_InitializeTriforcePolyThread() {
-  misc_sprites_graphics_index = 8;
-  LoadCommonSprites_2();
-  Intro_InitGfx_Helper();
-  intro_sprite_isinited[0] = 1;
-  intro_sprite_isinited[1] = 1;
-  intro_sprite_isinited[2] = 1;
-  intro_sprite_subtype[0] = 0;
-  intro_sprite_subtype[1] = 0;
-  intro_sprite_subtype[2] = 0;
-  intro_sprite_isinited[4] = 1;
-  intro_sprite_subtype[4] = 2;
-  INIDISP_copy = 15;
+void Credits_LoadScene_Overworld_Overlay() {  // 828697
+  Overworld_LoadOverlays2();
+  music_control = 0;
+  sound_effect_ambient = 0;
+  submodule_index--;
+  subsubmodule_index++;
+}
+
+void Credits_LoadScene_Overworld_LoadMap() {  // 8286a5
+  Overworld_LoadAndBuildScreen();
+  Credits_PrepAndLoadSprites();
+  R16 = 0;
+  subsubmodule_index = 0;
+}
+
+void Credits_OperateScrollingAndTileMap() {  // 8286b3
+  Credits_HandleCameraScrollControl();
+  if (BYTE(overworld_screen_trans_dir_bits2))
+    OverworldHandleMapScroll();
+}
+
+void Credits_LoadCoolBackground() {  // 8286c0
+  main_tile_theme_index = 33;
+  aux_tile_theme_index = 59;
+  sprite_graphics_index = 45;
+  InitializeTilesets();
+  BYTE(overworld_screen_index) = 0x5b;
+  Overworld_LoadPalettes(GetOverworldBgPalette(BYTE(overworld_screen_index)), 0x13);
+  overworld_palette_aux2_bp5to7_hi = 3;
+  Palette_Load_OWBG2();
+  Overworld_CopyPalettesToCache();
+  Overworld_LoadOverlays2();
+  BG1VOFS_copy2 = 0;
+  BG1HOFS_copy2 = 0;
+  submodule_index--;
+}
+
+void Credits_LoadScene_Dungeon() {  // 8286fd
+  EnableForceBlank();
+  EraseTileMaps_normal();
+  WORD(which_entrance) = kEnding_Tab1[submodule_index >> 1];
+
+  Dungeon_LoadEntrance();
+  dung_num_lit_torches = 0;
+  hdr_dungeon_dark_with_lantern = 0;
+  Dungeon_LoadAndDrawRoom();
+  DecompressAnimatedDungeonTiles(kDungAnimatedTiles[main_tile_theme_index]);
+
+  int i = submodule_index >> 1;
+  sprite_graphics_index = kEnding_SpritePack[i];
+  const DungPalInfo *dpi = GetDungPalInfo(kEnding_SpritePal[i] & 0x3f);
+  sprite_aux1_palette = dpi->pal2;
+  sprite_aux2_palette = dpi->pal3;
+  misc_sprites_graphics_index = 10;
+  InitializeTilesets();
+  palette_sp6 = 10;
+  Dungeon_LoadPalettes();
+  BGMODE_copy = 9;
+  R16 = 0;
+  INIDISP_copy = 0;
   submodule_index++;
+  Credits_PrepAndLoadSprites();
 }
 
-
-
-void TriforceRoom_PrepGFXSlotForPoly() {
-  misc_sprites_graphics_index = 8;
-  LoadCommonSprites_2();
-  Intro_InitGfx_Helper();
-  intro_sprite_isinited[0] = 1;
-  intro_sprite_isinited[1] = 1;
-  intro_sprite_isinited[2] = 1;
-  intro_sprite_subtype[0] = 4;
-  intro_sprite_subtype[1] = 5;
-  intro_sprite_subtype[2] = 6;
-  INIDISP_copy = 15;
-  submodule_index++;
-}
-
-void TriforceRoom_HandlePoly() {
-  is_nmi_thread_active = 1;
-  intro_want_double_ret = 1;
-  if (intro_did_run_step)
-    return;
-  switch (intro_step_index) {
-  case 0:
-    poly_config1 -= 2;
-    if (poly_config1 < 2) {
-      poly_config1 = 0;
-      intro_step_index++;
-      subsubmodule_index++;
-    }
-    // fall through
-  case 1:
-    if (subsubmodule_index >= 10) {
-      intro_step_index++;
-      intro_y_vel[1] = 5;
-    }
-    poly_b += 2, poly_a += 1;
-    break;
-  case 2:
-    triforce_ctr = 0x1c0;
-    if (poly_config1 < 128) {
-      poly_config1 += 1;
-    } else {
-      if ((poly_b - 10 & 0x7f) >= 92 &&
-          (uint8)(poly_a - 11) >= 220) {
-        poly_a = 0;
-        poly_b = 0;
-        subsubmodule_index++;
-        intro_step_index++;
-        sound_effect_1 = 44;
-        main_palette_buffer[0xd7] = 0x7fff;
-        flag_update_cgram_in_nmi++;
-        intro_step_timer = 6;
-        break;
-      }
-    }
-    poly_b += 5, poly_a += 3;
-    break;
-  case 3:
-    if (!--intro_step_timer) {
-      main_palette_buffer[0xd7] = kPolyhedralPalette[7];
-      flag_update_cgram_in_nmi++;
-      intro_step_index++;
-    }
-    break;
-  case 4:
-    break;
-  }
-  intro_did_run_step = 1;
-  intro_want_double_ret = 0;
-  intro_frame_ctr++;
-}
-
-
-void AdvancePolyhedral() {
-  TriforceRoom_HandlePoly();
-  Scene_AnimateEverySprite();
-}
-
-void Module19_TriforceRoom() {
+void Module19_TriforceRoom() {  // 829fec
   switch (subsubmodule_index) {
   case 0:  //
     Link_ResetProperties_A();
@@ -300,86 +403,336 @@ void Module19_TriforceRoom() {
   LinkOam_Main();
 }
 
+void Intro_InitializeBackgroundSettings() {  // 82c500
+  zelda_ppu_write(SETINI, 0);
+  BGMODE_copy = 9;
+  MOSAIC_copy = 0;
+  zelda_ppu_write(BG1SC, 0x13);
+  zelda_ppu_write(BG2SC, 3);
+  zelda_ppu_write(BG3SC, 0x63);
+  zelda_ppu_write(BG12NBA, 0x22);
+  zelda_ppu_write(BG34NBA, 7);
+  CGADSUB_copy = 32;
+  COLDATA_copy0 = 32;
+  COLDATA_copy1 = 64;
+  COLDATA_copy2 = 128;
+}
 
-struct IntroSpriteEnt {
-  int8 x, y;
-  uint8 charnum, flags;
-  uint8 ext;
-};
+void Polyhedral_InitializeThread() {  // 89f7de
+  static const uint8 kPolyThreadInit[13] = { 9, 0, 0x1f, 0, 0, 0, 0, 0, 0, 0x30, 0x1d, 0xf8, 9 };
+  memset(kPolyThreadRam, 0, 256);
+  thread_other_stack = 0x1f31;
+  memcpy(&g_ram[0x1f32], kPolyThreadInit, 13);
+}
 
-void AnimateSceneSprite_AddObjectsToOamBuffer(int k, const IntroSpriteEnt *src, int num) {
-  uint16 x = intro_x_hi[k] << 8 | intro_x_lo[k];
-  uint16 y = intro_y_hi[k] << 8 | intro_y_lo[k];
-  OamEnt *oam = (OamEnt *)&g_ram[intro_sprite_alloc];
-  intro_sprite_alloc += num * 4;
+void Module00_Intro() {  // 8cc120
+  if (submodule_index >= 8 && ((filtered_joypad_L & 0xc0 | filtered_joypad_H) & 0xd0)) {
+    FadeMusicAndResetSRAMMirror();
+    return;
+  }
+  switch (submodule_index) {
+  case 0: Intro_Init(); break;
+  case 1: Intro_Init_Continue(); break;
+  case 10:
+  case 2: Intro_InitializeTriforcePolyThread(); break;
+  case 3:
+  case 4:
+  case 9:
+  case 11: Intro_HandleAllTriforceAnimations(); break;
+  case 5: IntroZeldaFadein(); break;
+  case 6: Intro_SwordComingDown(); break;
+  case 7: Intro_FadeInBg(); break;
+  case 8: Intro_WaitPlayer(); break;
+  }
+}
+
+void Intro_Init() {  // 8cc15d
+  Intro_SetupScreen();
+  INIDISP_copy = 15;
+  subsubmodule_index = 0;
+  flag_update_cgram_in_nmi++;
+  submodule_index++;
+  sound_effect_2 = 10;
+  Intro_Init_Continue();
+}
+
+void Intro_Init_Continue() {  // 8cc170
+  Intro_DisplayLogo();
+  int t = subsubmodule_index++;
+  if (t >= 11) {
+    if (--INIDISP_copy)
+      return;
+    Intro_InitializeMemory_darken();
+    return;
+  }
+  switch (t) {
+  case 0: case 1: case 2: case 3: case 4: case 5: case 6: case 7:
+    Intro_Clear1kbBlocksOfWRAM();
+    break;
+  case 8: Intro_LoadTextPointersAndPalettes(); break;
+  case 9: LoadItemGFXIntoWRAM4BPPBuffer(); break;
+  case 10:LoadFollowerGraphics(); break;
+  }
+}
+
+void Intro_Clear1kbBlocksOfWRAM() {  // 8cc1a0
+  uint16 i = R16;
+  uint8 *dst = (uint8 *)&g_ram[0x2000];
   do {
-    uint16 xcur = x + src->x;
-    uint16 ycur = y + src->y;
-    oam->x = xcur;
-    oam->y = ClampYForOam(ycur);
-    oam->charnum = src->charnum;
-    oam->flags = src->flags;
-    bytewise_extended_oam[oam - oam_buf] = src->ext | (xcur >> 8 & 1);
-  } while (oam++, src++, --num);
+    for (int j = 0; j < 15; j++)
+      WORD(dst[i + j * 0x2000]) = 0;
+  } while ((i -= 2) != R18);
+  R16 = i;
+  R18 = i - 0x400;
 }
 
-void Intro_CopySpriteType4ToOam(int k) {
-  static const IntroSpriteEnt kIntroTriforceOam_Left[16] = {
-    { 0,  0, 0x80, 0x2b, 2},
-    {16,  0, 0x82, 0x2b, 2},
-    {32,  0, 0x84, 0x2b, 2},
-    {48,  0, 0x86, 0x2b, 2},
-    { 0, 16, 0xa0, 0x2b, 2},
-    {16, 16, 0xa2, 0x2b, 2},
-    {32, 16, 0xa4, 0x2b, 2},
-    {48, 16, 0xa6, 0x2b, 2},
-    { 0, 32, 0x88, 0x2b, 2},
-    {16, 32, 0x8a, 0x2b, 2},
-    {32, 32, 0x8c, 0x2b, 2},
-    {48, 32, 0x8e, 0x2b, 2},
-    { 0, 48, 0xa8, 0x2b, 2},
-    {16, 48, 0xaa, 0x2b, 2},
-    {32, 48, 0xac, 0x2b, 2},
-    {48, 48, 0xae, 0x2b, 2},
-  };
-  static const IntroSpriteEnt kIntroTriforceOam_Right[16] = {
-    {48,  0, 0x80, 0x6b, 2},
-    {32,  0, 0x82, 0x6b, 2},
-    {16,  0, 0x84, 0x6b, 2},
-    { 0,  0, 0x86, 0x6b, 2},
-    {48, 16, 0xa0, 0x6b, 2},
-    {32, 16, 0xa2, 0x6b, 2},
-    {16, 16, 0xa4, 0x6b, 2},
-    { 0, 16, 0xa6, 0x6b, 2},
-    {48, 32, 0x88, 0x6b, 2},
-    {32, 32, 0x8a, 0x6b, 2},
-    {16, 32, 0x8c, 0x6b, 2},
-    { 0, 32, 0x8e, 0x6b, 2},
-    {48, 48, 0xa8, 0x6b, 2},
-    {32, 48, 0xaa, 0x6b, 2},
-    {16, 48, 0xac, 0x6b, 2},
-    { 0, 48, 0xae, 0x6b, 2},
-  };
-  AnimateSceneSprite_AddObjectsToOamBuffer(k, k == 2 ? kIntroTriforceOam_Right : kIntroTriforceOam_Left, 16);
+void Intro_InitializeMemory_darken() {  // 8cc1f5
+  EnableForceBlank();
+  EraseTileMaps_normal();
+  zelda_ppu_write(OBSEL, 2);
+  main_tile_theme_index = 35;
+  sprite_graphics_index = 125;
+  aux_tile_theme_index = 81;
+  misc_sprites_graphics_index = 8;
+  LoadDefaultGraphics();
+  InitializeTilesets();
+  DecompressAnimatedDungeonTiles(0x5d);
+  bg_tile_animation_countdown = 2;
+  BYTE(overworld_screen_index) = 0;
+  dung_hdr_palette_1 = 0;
+  overworld_palette_aux3_bp7_lo = 0;
+  R16 = 0;
+  R18 = 0;
+  darkening_or_lightening_screen = 2;
+  palette_filter_countdown = 31;
+  mosaic_target_level = 0;
+  submodule_index++;
 }
 
-void AnimateSceneSprite_MoveTriangle(int k) {
-  if (intro_x_vel[k] != 0) {
-    uint32 t = intro_x_subpixel[k] + (intro_x_lo[k] << 8) + (intro_x_hi[k] << 16) + ((int8)intro_x_vel[k] << 4);
-    intro_x_subpixel[k] = t, intro_x_lo[k] = t >> 8, intro_x_hi[k] = t >> 16;
-  }
-  if (intro_y_vel[k] != 0) {
-    uint32 t = intro_y_subpixel[k] + (intro_y_lo[k] << 8) + (intro_y_hi[k] << 16) + ((int8)intro_y_vel[k] << 4);
-    intro_y_subpixel[k] = t, intro_y_lo[k] = t >> 8, intro_y_hi[k] = t >> 16;
+void IntroZeldaFadein() {  // 8cc25c
+  Intro_HandleAllTriforceAnimations();
+  if (!(frame_counter & 1))
+    return;
+  Palette_FadeIntroOneStep();
+  if (BYTE(palette_filter_countdown) == 0) {
+    subsubmodule_index = 42;
+    submodule_index++;
+    Intro_SetupSwordAndIntroFlash();
+  } else if (BYTE(palette_filter_countdown) == 13) {
+    TM_copy = 0x15;
+    TS_copy = 0;
   }
 }
 
-static const int8 kIntroSprite0_Xvel[3] = { 1, 0, -1 };
-static const int8 kIntroSprite0_Yvel[3] = { -1, 1, -1 };
+void Intro_FadeInBg() {  // 8cc284
+  Intro_PeriodicSwordAndIntroFlash();
+  Intro_HandleAllTriforceAnimations();
+  if (BYTE(palette_filter_countdown)) {
+    if (frame_counter & 1)
+      Palette_FadeIntro2();
+  } else {
+    if ((filtered_joypad_L & 0xc0 | filtered_joypad_H) & 0xd0)
+      FadeMusicAndResetSRAMMirror();
+    else {
+      if (!--subsubmodule_index)
+        submodule_index++;
+    }
+  }
+}
 
-void Intro_SpriteType_A_0(int k) {
+void Intro_SwordComingDown() {  // 8cc2ae
+  Intro_HandleAllTriforceAnimations();
+  intro_did_run_step = 0;
+  is_nmi_thread_active = 0;
+  Intro_PeriodicSwordAndIntroFlash();
+  if (!--subsubmodule_index) {
+    submodule_index++;
+    CGWSEL_copy = 2;
+    CGADSUB_copy = 0x22;
+    palette_filter_countdown = 31;
+    TS_copy = 2;
+  }
+}
+
+void Intro_WaitPlayer() {  // 8cc2d4
+  Intro_HandleAllTriforceAnimations();
+  intro_did_run_step = 0;
+  is_nmi_thread_active = 0;
+  Intro_PeriodicSwordAndIntroFlash();
+  if (!--subsubmodule_index) {
+    submodule_index++;
+    main_module_index = 20;
+    submodule_index = 0;
+    BYTE(link_x_coord) = 0;
+  }
+}
+
+void FadeMusicAndResetSRAMMirror() {  // 8cc2f0
+  irq_flag = 255;
+  TM_copy = 0x15;
+  TS_copy = 0;
+  player_is_indoors = 0;
+  music_control = 0xf1;
+  SetBackdropcolorBlack();
+
+  memset(&link_y_coord, 0, 0x70);
+  memset(save_dung_info, 0, 256 * 5);
+
+  main_module_index = 1;
+  death_var4 = 1;
+  submodule_index = 0;
+}
+
+void Intro_InitializeTriforcePolyThread() {  // 8cc33c
+  misc_sprites_graphics_index = 8;
+  LoadCommonSprites_2();
+  Intro_InitGfx_Helper();
+  intro_sprite_isinited[0] = 1;
+  intro_sprite_isinited[1] = 1;
+  intro_sprite_isinited[2] = 1;
+  intro_sprite_subtype[0] = 0;
+  intro_sprite_subtype[1] = 0;
+  intro_sprite_subtype[2] = 0;
+  intro_sprite_isinited[4] = 1;
+  intro_sprite_subtype[4] = 2;
+  INIDISP_copy = 15;
+  submodule_index++;
+}
+
+void Intro_InitGfx_Helper() {  // 8cc36f
+  Polyhedral_InitializeThread();
+  LoadTriforceSpritePalette();
+  virq_trigger = 0x90;
+  poly_config1 = 255;
+  poly_base_x = 32;
+  poly_base_y = 32;
+  BYTE(poly_var1) = 32;
+  poly_a = 0xA0;
+  poly_b = 0x60;
+  poly_config_color_mode = 1;
+  poly_which_model = 1;
+  is_nmi_thread_active = 1;
+  intro_did_run_step = 1;
+  memset(&intro_step_index, 0, 7 * 16);
+}
+
+void LoadTriforceSpritePalette() {  // 8cc3bd
+  memcpy(main_palette_buffer + 0xd0, kPolyhedralPalette, 16);
+  flag_update_cgram_in_nmi++;
+}
+
+void Intro_HandleAllTriforceAnimations() {  // 8cc404
+  intro_frame_ctr++;
+  Intro_AnimateTriforce();
+  Scene_AnimateEverySprite();
+}
+
+void Scene_AnimateEverySprite() {  // 8cc412
+  intro_sprite_alloc = 0x800;
+  for (int k = 7; k >= 0; k--)
+    Intro_AnimOneObj(k);
+}
+
+void Intro_AnimateTriforce() {  // 8cc435
+  is_nmi_thread_active = 1;
+  if (!intro_did_run_step) {
+    Intro_RunStep();
+    intro_did_run_step = 1;
+  }
+}
+
+void Intro_RunStep() {  // 8cc448
+  switch (intro_step_index) {
+  case 0:
+    if (++intro_step_timer == 64)
+      intro_step_index++;
+    poly_b += 5, poly_a += 3;
+    break;
+  case 1:
+    if (poly_config1 < 2) {
+      poly_config1 = 0;
+      intro_step_index++;
+      intro_step_timer = 64;
+      return;
+    }
+    poly_config1 -= 2;
+    poly_b += 5;
+    poly_a += 3;
+    if (poly_config1 < 225)
+      submodule_index = 4;
+    if (poly_config1 == 113)
+      music_control = 1;
+    break;
+  case 2:
+    if (!--intro_step_timer) {
+      intro_step_index++;
+    } else {
+      poly_b += 5, poly_a += 3;
+    }
+    break;
+  case 3:
+    if (poly_b >= 250 && poly_a >= 252) {
+      intro_step_index++;
+      intro_step_timer = 32;
+    } else {
+      poly_b += 5, poly_a += 3;
+    }
+    break;
+  case 4:
+    poly_b = 0;
+    poly_a = 0;
+    if (!--intro_step_timer) {
+      intro_step_index++;
+      intro_sprite_isinited[5] = 1;
+      intro_sprite_subtype[5] = 3;
+      TM_copy = 0x10;
+      TS_copy = 5;
+      CGWSEL_copy = 2;
+      CGADSUB_copy = 0x31;
+      subsubmodule_index = 0;
+      flag_update_cgram_in_nmi++;
+      nmi_load_bg_from_vram = 3;
+      submodule_index++;
+    }
+    break;
+  }
+
+}
+
+void Intro_AnimOneObj(int k) {  // 8cc534
+  switch (intro_sprite_isinited[k]) {
+  case 0:
+    break;
+  case 1:
+    switch (intro_sprite_subtype[k]) {
+    case 0: Intro_SpriteType_A_0(k); break;
+    case 1: EXIT_0CCA90(k); break;
+    case 2: InitializeSceneSprite_Copyright(k); break;
+    case 3: InitializeSceneSprite_Sparkle(k); break;
+    case 4:
+    case 5:
+    case 6: InitializeSceneSprite_TriforceRoomTriangle(k); break;
+    case 7: InitializeSceneSprite_CreditsTriangle(k); break;
+    }
+    break;
+  case 2:
+    switch (intro_sprite_subtype[k]) {
+    case 0: Intro_SpriteType_B_0(k); break;
+    case 1: EXIT_0CCA90(k); break;
+    case 2: AnimateSceneSprite_Copyright(k); break;
+    case 3: AnimateSceneSprite_Sparkle(k); break;
+    case 4:
+    case 5:
+    case 6: Intro_SpriteType_B_456(k); break;
+    case 7: AnimateSceneSprite_CreditsTriangle(k); break;
+    }
+    break;
+  }
+}
+
+void Intro_SpriteType_A_0(int k) {  // 8cc57e
   static const int16 kIntroSprite0_X[3] = { -38, 95, 230 };
-  static const int16 kIntroSprite0_Y[3] = { 200, -64, 200 };
+  static const int16 kIntroSprite0_Y[3] = { 200, -67, 200 };
   intro_x_lo[k] = kIntroSprite0_X[k];
   intro_x_hi[k] = kIntroSprite0_X[k] >> 8;
   intro_y_lo[k] = kIntroSprite0_Y[k];
@@ -389,7 +742,28 @@ void Intro_SpriteType_A_0(int k) {
   intro_sprite_isinited[k]++;
 }
 
-void AnimateSceneSprite_DrawTriangle(int k) {
+void Intro_SpriteType_B_0(int k) {  // 8cc5b1
+  static const uint8 kIntroSprite0_XLimit[3] = { 75, 95, 117 };
+  static const uint8 kIntroSprite0_YLimit[3] = { 88, 48, 88 };
+
+  AnimateSceneSprite_DrawTriangle(k);
+  AnimateSceneSprite_MoveTriangle(k);
+  if (intro_step_index != 5) {
+    if (!(intro_frame_ctr & 31)) {
+      intro_x_vel[k] += kIntroSprite0_Xvel[k];
+      intro_y_vel[k] += kIntroSprite0_Yvel[k];
+    }
+    if (intro_x_lo[k] == kIntroSprite0_XLimit[k])
+      intro_x_vel[k] = 0;
+    if (intro_y_lo[k] == kIntroSprite0_YLimit[k])
+      intro_y_vel[k] = 0;
+  } else {
+    intro_x_vel[k] = 0;
+    intro_y_vel[k] = 0;
+  }
+}
+
+void AnimateSceneSprite_DrawTriangle(int k) {  // 8cc70f
   static const IntroSpriteEnt kIntroSprite0_Left_Ents[16] = {
     { 0,  0, 0x80, 0x1b, 2},
     {16,  0, 0x82, 0x1b, 2},
@@ -429,108 +803,51 @@ void AnimateSceneSprite_DrawTriangle(int k) {
   AnimateSceneSprite_AddObjectsToOamBuffer(k, k == 2 ? kIntroSprite0_Right_Ents : kIntroSprite0_Left_Ents, 16);
 }
 
-void Intro_SpriteType_B_0(int k) {
-  static const int16 kIntroSprite0_XLimit[3] = { 75, 95, 117 };
-  static const int16 kIntroSprite0_YLimit[3] = { 88, 48, 88 };
-
-  AnimateSceneSprite_DrawTriangle(k);
-  AnimateSceneSprite_MoveTriangle(k);
-  if (intro_step_index != 5) {
-    if (!(intro_frame_ctr & 31)) {
-      intro_x_vel[k] += kIntroSprite0_Xvel[k];
-      intro_y_vel[k] += kIntroSprite0_Yvel[k];
-    }
-    if (intro_x_lo[k] == kIntroSprite0_XLimit[k])
-      intro_x_vel[k] = 0;
-    if (intro_y_lo[k] == kIntroSprite0_YLimit[k])
-      intro_y_vel[k] = 0;
-  } else {
-    intro_x_vel[k] = 0;
-    intro_y_vel[k] = 0;
-  }
+void Intro_CopySpriteType4ToOam(int k) {  // 8cc82f
+  static const IntroSpriteEnt kIntroTriforceOam_Left[16] = {
+    { 0,  0, 0x80, 0x2b, 2},
+    {16,  0, 0x82, 0x2b, 2},
+    {32,  0, 0x84, 0x2b, 2},
+    {48,  0, 0x86, 0x2b, 2},
+    { 0, 16, 0xa0, 0x2b, 2},
+    {16, 16, 0xa2, 0x2b, 2},
+    {32, 16, 0xa4, 0x2b, 2},
+    {48, 16, 0xa6, 0x2b, 2},
+    { 0, 32, 0x88, 0x2b, 2},
+    {16, 32, 0x8a, 0x2b, 2},
+    {32, 32, 0x8c, 0x2b, 2},
+    {48, 32, 0x8e, 0x2b, 2},
+    { 0, 48, 0xa8, 0x2b, 2},
+    {16, 48, 0xaa, 0x2b, 2},
+    {32, 48, 0xac, 0x2b, 2},
+    {48, 48, 0xae, 0x2b, 2},
+  };
+  static const IntroSpriteEnt kIntroTriforceOam_Right[16] = {
+    {48,  0, 0x80, 0x6b, 2},
+    {32,  0, 0x82, 0x6b, 2},
+    {16,  0, 0x84, 0x6b, 2},
+    { 0,  0, 0x86, 0x6b, 2},
+    {48, 16, 0xa0, 0x6b, 2},
+    {32, 16, 0xa2, 0x6b, 2},
+    {16, 16, 0xa4, 0x6b, 2},
+    { 0, 16, 0xa6, 0x6b, 2},
+    {48, 32, 0x88, 0x6b, 2},
+    {32, 32, 0x8a, 0x6b, 2},
+    {16, 32, 0x8c, 0x6b, 2},
+    { 0, 32, 0x8e, 0x6b, 2},
+    {48, 48, 0xa8, 0x6b, 2},
+    {32, 48, 0xaa, 0x6b, 2},
+    {16, 48, 0xac, 0x6b, 2},
+    { 0, 48, 0xae, 0x6b, 2},
+  };
+  AnimateSceneSprite_AddObjectsToOamBuffer(k, k == 2 ? kIntroTriforceOam_Right : kIntroTriforceOam_Left, 16);
 }
 
-
-void EXIT_0CCA90(int k) {
+void EXIT_0CCA90(int k) {  // 8cc84f
   // empty
 }
 
-static const uint8 kIntroSprite3_X[4] = { 0xc2, 0x98, 0x6f, 0x34 };
-static const uint8 kIntroSprite3_Y[4] = { 0x7c, 0x54, 0x7c, 0x57 };
-static const uint8 kIntroSprite3_State[8] = { 0, 1, 2, 3, 2, 1, 0xff, 0xff };
-
-void InitializeSceneSprite_Sparkle(int k) {
-  int j = intro_frame_ctr >> 5 & 3;
-  intro_x_lo[k] = kIntroSprite3_X[j];
-  intro_x_hi[k] = 0;
-  intro_y_lo[k] = kIntroSprite3_Y[j];
-  intro_y_hi[k] = 0;
-  intro_sprite_isinited[k]++;
-}
-
-void AnimateSceneSprite_Sparkle(int k) {
-  static const IntroSpriteEnt kIntroSprite3_Ents[4] = {
-    { 0,  0, 0x80, 0x34, 0},
-    { 0,  0, 0xb7, 0x34, 0},
-    {-4, -3, 0x64, 0x38, 2},
-    {-4, -3, 0x62, 0x34, 2},
-  };
-  if (intro_sprite_state[k] < 4)
-    AnimateSceneSprite_AddObjectsToOamBuffer(k, kIntroSprite3_Ents + intro_sprite_state[k], 1);
-
-  intro_sprite_state[k] = kIntroSprite3_State[intro_frame_ctr >> 2 & 7];
-  int j = intro_frame_ctr >> 5 & 3;
-  intro_x_lo[k] = kIntroSprite3_X[j];
-  intro_y_lo[k] = kIntroSprite3_Y[j];
-}
-
-
-void InitializeSceneSprite_TriforceRoomTriangle(int k) {
-  static const int16 kIntroTriforce_X[3] = { 0x4e, 0x5f, 0x72 };
-  static const int16 kIntroTriforce_Y[3] = { 0x9c, 0x9c, 0x9c };
-  static const int8 kIntroTriforce_Xvel[3] = { -2, 0, 2 };
-  static const int8 kIntroTriforce_Yvel[3] = { 4, -4, 4 };
-
-  intro_x_lo[k] = kIntroTriforce_X[k];
-  intro_x_hi[k] = 0;
-  intro_y_lo[k] = kIntroTriforce_Y[k];
-  intro_y_hi[k] = 0;
-  intro_x_vel[k] = kIntroTriforce_Xvel[k];
-  intro_y_vel[k] = kIntroTriforce_Yvel[k];
-  intro_sprite_isinited[k]++;
-}
-
-void InitializeSceneSprite_CreditsTriangle(int k) {
-  static const uint8 kIntroSprite7_X[3] = { 0x29, 0x5f, 0x97 };
-  static const uint8 kIntroSprite7_Y[3] = { 0x70, 0x20, 0x70 };
-  intro_x_lo[k] = kIntroSprite7_X[k];
-  intro_x_hi[k] = 0;
-  intro_y_lo[k] = kIntroSprite7_Y[k];
-  intro_y_hi[k] = 0;
-  intro_sprite_isinited[k]++;
-}
-
-void AnimateSceneSprite_CreditsTriangle(int k) {
-  static const int8 kIntroSprite7_XAcc[3] = { -1, 0, 1 };
-  static const int8 kIntroSprite7_YAcc[3] = { 1, -1, 1 };
-
-  LoadTriforceSpritePalette();
-  Intro_CopySpriteType4ToOam(k);
-  AnimateSceneSprite_MoveTriangle(k);
-  if (submodule_index != 36) {
-    intro_sprite_state[k] = 0;
-    return;
-  }
-  if (intro_sprite_state[k] != 80) {
-    intro_sprite_state[k]++;
-    intro_x_vel[k] += kIntroSprite7_XAcc[k];
-    intro_y_vel[k] += kIntroSprite7_YAcc[k];
-  }
-}
-
-
-
-void InitializeSceneSprite_Copyright(int k) {
+void InitializeSceneSprite_Copyright(int k) {  // 8cc850
   intro_x_lo[k] = 76;
   intro_x_hi[k] = 0;
   intro_y_lo[k] = 184;
@@ -538,7 +855,7 @@ void InitializeSceneSprite_Copyright(int k) {
   intro_sprite_isinited[k]++;
 }
 
-void AnimateSceneSprite_Copyright(int k) {
+void AnimateSceneSprite_Copyright(int k) {  // 8cc864
   static const IntroSpriteEnt kIntroSprite2_Ents[13] = {
     { 0, 0, 0x40, 0x0a, 0},
     { 8, 0, 0x41, 0x0a, 0},
@@ -557,17 +874,175 @@ void AnimateSceneSprite_Copyright(int k) {
   AnimateSceneSprite_AddObjectsToOamBuffer(k, kIntroSprite2_Ents, 13);
 }
 
-static const uint8 kTriforce_Xfinal[3] = { 0x59, 0x5f, 0x67 };
-static const uint8 kTriforce_Yfinal[3] = { 0x74, 0x68, 0x74 };
-
-void AnimateTriforceRoomTriangle_HandleContracting(int k) {
-  uint8 new_vel = intro_x_vel[k] + (intro_x_lo[k] <= kTriforce_Xfinal[k] ? 1 : -1);
-  intro_x_vel[k] = (new_vel == 0x11) ? 0x10 : (new_vel == 0xef) ? 0xf0 : new_vel;
-  new_vel = intro_y_vel[k] + (intro_y_lo[k] <= kTriforce_Yfinal[k] ? 1 : -1);
-  intro_y_vel[k] = (new_vel == 0x11) ? 0x10 : (new_vel == 0xef) ? 0xf0 : new_vel;
+void InitializeSceneSprite_Sparkle(int k) {  // 8cc8e2
+  int j = intro_frame_ctr >> 5 & 3;
+  intro_x_lo[k] = kIntroSprite3_X[j];
+  intro_x_hi[k] = 0;
+  intro_y_lo[k] = kIntroSprite3_Y[j];
+  intro_y_hi[k] = 0;
+  intro_sprite_isinited[k]++;
 }
 
-void Intro_SpriteType_B_456(int k) {
+void AnimateSceneSprite_Sparkle(int k) {  // 8cc90d
+  static const IntroSpriteEnt kIntroSprite3_Ents[4] = {
+    { 0,  0, 0x80, 0x34, 0},
+    { 0,  0, 0xb7, 0x34, 0},
+    {-4, -3, 0x64, 0x38, 2},
+    {-4, -3, 0x62, 0x34, 2},
+  };
+  if (intro_sprite_state[k] < 4)
+    AnimateSceneSprite_AddObjectsToOamBuffer(k, kIntroSprite3_Ents + intro_sprite_state[k], 1);
+
+  intro_sprite_state[k] = kIntroSprite3_State[intro_frame_ctr >> 2 & 7];
+  int j = intro_frame_ctr >> 5 & 3;
+  intro_x_lo[k] = kIntroSprite3_X[j];
+  intro_y_lo[k] = kIntroSprite3_Y[j];
+}
+
+void AnimateSceneSprite_AddObjectsToOamBuffer(int k, const IntroSpriteEnt *src, int num) {  // 8cc972
+  uint16 x = intro_x_hi[k] << 8 | intro_x_lo[k];
+  uint16 y = intro_y_hi[k] << 8 | intro_y_lo[k];
+  OamEnt *oam = (OamEnt *)&g_ram[intro_sprite_alloc];
+  intro_sprite_alloc += num * 4;
+  do {
+    uint16 xcur = x + src->x;
+    uint16 ycur = y + src->y;
+    oam->x = xcur;
+    oam->y = ClampYForOam(ycur);
+    oam->charnum = src->charnum;
+    oam->flags = src->flags;
+    bytewise_extended_oam[oam - oam_buf] = src->ext | (xcur >> 8 & 1);
+  } while (oam++, src++, --num);
+}
+
+void AnimateSceneSprite_MoveTriangle(int k) {  // 8cc9f1
+  if (intro_x_vel[k] != 0) {
+    uint32 t = intro_x_subpixel[k] + (intro_x_lo[k] << 8) + (intro_x_hi[k] << 16) + ((int8)intro_x_vel[k] << 4);
+    intro_x_subpixel[k] = t, intro_x_lo[k] = t >> 8, intro_x_hi[k] = t >> 16;
+  }
+  if (intro_y_vel[k] != 0) {
+    uint32 t = intro_y_subpixel[k] + (intro_y_lo[k] << 8) + (intro_y_hi[k] << 16) + ((int8)intro_y_vel[k] << 4);
+    intro_y_subpixel[k] = t, intro_y_lo[k] = t >> 8, intro_y_hi[k] = t >> 16;
+  }
+}
+
+void TriforceRoom_PrepGFXSlotForPoly() {  // 8cca54
+  misc_sprites_graphics_index = 8;
+  LoadCommonSprites_2();
+  Intro_InitGfx_Helper();
+  intro_sprite_isinited[0] = 1;
+  intro_sprite_isinited[1] = 1;
+  intro_sprite_isinited[2] = 1;
+  intro_sprite_subtype[0] = 4;
+  intro_sprite_subtype[1] = 5;
+  intro_sprite_subtype[2] = 6;
+  INIDISP_copy = 15;
+  submodule_index++;
+}
+
+void Credits_InitializePolyhedral() {  // 8cca81
+  misc_sprites_graphics_index = 8;
+  LoadCommonSprites_2();
+  Intro_InitGfx_Helper();
+  poly_config1 = 0;
+  intro_sprite_isinited[0] = 1;
+  intro_sprite_isinited[1] = 1;
+  intro_sprite_isinited[2] = 1;
+  intro_sprite_subtype[0] = 7;
+  intro_sprite_subtype[1] = 7;
+  intro_sprite_subtype[2] = 7;
+  INIDISP_copy = 15;
+  submodule_index++;
+}
+
+void AdvancePolyhedral() {  // 8ccab1
+  TriforceRoom_HandlePoly();
+  Scene_AnimateEverySprite();
+}
+
+void TriforceRoom_HandlePoly() {  // 8ccabc
+  is_nmi_thread_active = 1;
+  intro_want_double_ret = 1;
+  if (intro_did_run_step)
+    return;
+  switch (intro_step_index) {
+  case 0:
+    poly_config1 -= 2;
+    if (poly_config1 < 2) {
+      poly_config1 = 0;
+      intro_step_index++;
+      subsubmodule_index++;
+    }
+    // fall through
+  case 1:
+    if (subsubmodule_index >= 10) {
+      intro_step_index++;
+      intro_y_vel[1] = 5;
+    }
+    poly_b += 2, poly_a += 1;
+    break;
+  case 2:
+    triforce_ctr = 0x1c0;
+    if (poly_config1 < 128) {
+      poly_config1 += 1;
+    } else {
+      if ((poly_b - 10 & 0x7f) >= 92 &&
+          (uint8)(poly_a - 11) >= 220) {
+        poly_a = 0;
+        poly_b = 0;
+        subsubmodule_index++;
+        intro_step_index++;
+        sound_effect_1 = 44;
+        main_palette_buffer[0xd7] = 0x7fff;
+        flag_update_cgram_in_nmi++;
+        intro_step_timer = 6;
+        break;
+      }
+    }
+    poly_b += 5, poly_a += 3;
+    break;
+  case 3:
+    if (!--intro_step_timer) {
+      main_palette_buffer[0xd7] = kPolyhedralPalette[7];
+      flag_update_cgram_in_nmi++;
+      intro_step_index++;
+    }
+    break;
+  case 4:
+    break;
+  }
+  intro_did_run_step = 1;
+  intro_want_double_ret = 0;
+  intro_frame_ctr++;
+}
+
+void Credits_AnimateTheTriangles() {  // 8ccba2
+  intro_frame_ctr++;
+  is_nmi_thread_active = 1;
+  if (!intro_did_run_step) {
+    poly_b += 3;
+    poly_a += 1;
+    intro_did_run_step = 1;
+  }
+  Scene_AnimateEverySprite();
+}
+
+void InitializeSceneSprite_TriforceRoomTriangle(int k) {  // 8ccbe8
+  static const int16 kIntroTriforce_X[3] = { 0x4e, 0x5f, 0x72 };
+  static const int16 kIntroTriforce_Y[3] = { 0x9c, 0x9c, 0x9c };
+  static const int8 kIntroTriforce_Xvel[3] = { -2, 0, 2 };
+  static const int8 kIntroTriforce_Yvel[3] = { 4, -4, 4 };
+
+  intro_x_lo[k] = kIntroTriforce_X[k];
+  intro_x_hi[k] = 0;
+  intro_y_lo[k] = kIntroTriforce_Y[k];
+  intro_y_hi[k] = 0;
+  intro_x_vel[k] = kIntroTriforce_Xvel[k];
+  intro_y_vel[k] = kIntroTriforce_Yvel[k];
+  intro_sprite_isinited[k]++;
+}
+
+void Intro_SpriteType_B_456(int k) {  // 8ccc13
   static const int8 kTriforce_Xacc[3] = { -1, 0, 1 };
   static const int8 kTriforce_Yacc[3] = { -1, -1, -1 };
   static const uint8 kTriforce_Yfinal2[3] = { 0x72, 0x66, 0x72 };
@@ -606,87 +1081,168 @@ void Intro_SpriteType_B_456(int k) {
   }
 }
 
+void AnimateTriforceRoomTriangle_HandleContracting(int k) {  // 8cccb0
+  uint8 new_vel = intro_x_vel[k] + (intro_x_lo[k] <= kTriforce_Xfinal[k] ? 1 : -1);
+  intro_x_vel[k] = (new_vel == 0x11) ? 0x10 : (new_vel == 0xef) ? 0xf0 : new_vel;
+  new_vel = intro_y_vel[k] + (intro_y_lo[k] <= kTriforce_Yfinal[k] ? 1 : -1);
+  intro_y_vel[k] = (new_vel == 0x11) ? 0x10 : (new_vel == 0xef) ? 0xf0 : new_vel;
+}
 
-void Intro_AnimOneObj(int k) {
-  switch (intro_sprite_isinited[k]) {
-  case 0:
-    break;
-  case 1:
-    switch (intro_sprite_subtype[k]) {
-    case 0: Intro_SpriteType_A_0(k); break;
-    case 1: EXIT_0CCA90(k); break;
-    case 2: InitializeSceneSprite_Copyright(k); break;
-    case 3: InitializeSceneSprite_Sparkle(k); break;
-    case 4:
-    case 5:
-    case 6: InitializeSceneSprite_TriforceRoomTriangle(k); break;
-    case 7: InitializeSceneSprite_CreditsTriangle(k); break;
-    }
-    break;
-  case 2:
-    switch (intro_sprite_subtype[k]) {
-    case 0: Intro_SpriteType_B_0(k); break;
-    case 1: EXIT_0CCA90(k); break;
-    case 2: AnimateSceneSprite_Copyright(k); break;
-    case 3: AnimateSceneSprite_Sparkle(k); break;
-    case 4:
-    case 5:
-    case 6: Intro_SpriteType_B_456(k); break;
-    case 7: AnimateSceneSprite_CreditsTriangle(k); break;
-    }
-    break;
+void InitializeSceneSprite_CreditsTriangle(int k) {  // 8ccd19
+  static const uint8 kIntroSprite7_X[3] = { 0x29, 0x5f, 0x97 };
+  static const uint8 kIntroSprite7_Y[3] = { 0x70, 0x20, 0x70 };
+  intro_x_lo[k] = kIntroSprite7_X[k];
+  intro_x_hi[k] = 0;
+  intro_y_lo[k] = kIntroSprite7_Y[k];
+  intro_y_hi[k] = 0;
+  intro_sprite_isinited[k]++;
+}
+
+void AnimateSceneSprite_CreditsTriangle(int k) {  // 8ccd3e
+  static const int8 kIntroSprite7_XAcc[3] = { -1, 0, 1 };
+  static const int8 kIntroSprite7_YAcc[3] = { 1, -1, 1 };
+
+  LoadTriforceSpritePalette();
+  Intro_CopySpriteType4ToOam(k);
+  AnimateSceneSprite_MoveTriangle(k);
+  if (submodule_index != 36) {
+    intro_sprite_state[k] = 0;
+    return;
+  }
+  if (intro_sprite_state[k] != 80) {
+    intro_sprite_state[k]++;
+    intro_x_vel[k] += kIntroSprite7_XAcc[k];
+    intro_y_vel[k] += kIntroSprite7_YAcc[k];
   }
 }
 
-void Scene_AnimateEverySprite() {
-  intro_sprite_alloc = 0x800;
-  for (int k = 7; k >= 0; k--)
-    Intro_AnimOneObj(k);
+void Intro_DisplayLogo() {  // 8ced82
+  static const uint8 kIntroLogo_X[4] = { 0x60, 0x70, 0x80, 0x88 };
+  static const uint8 kIntroLogo_Tile[4] = { 0x69, 0x6b, 0x6d, 0x6e };
+  OamEnt *oam = oam_buf;
+  for (int i = 0; i < 4; i++) {
+    oam[i].x = kIntroLogo_X[i];
+    oam[i].y = 0x68;
+    oam[i].charnum = kIntroLogo_Tile[i];
+    oam[i].flags = 0x32;
+    bytewise_extended_oam[i] = 2;
+  }
 }
 
-static const uint16 kEndingSprites_X[] = {
-  0x1e0, 0x200, 0x1ed, 0x203, 0x1da, 0x216, 0x1c8, 0x228, 0x1c0, 0x1e0, 0x208, 0x228,
-  0xf8, 0xf0,
-  0x278, 0x298, 0x1e0, 0x200, 0x220, 0x288, 0x1e2,
-  0xe0, 0x150, 0xe8, 0x168, 0x128, 0x170, 0x170,
-  0x335, 0x335, 0x300,
-  0xb8, 0xce, 0xac, 0xc4,
-  0x3b0, 0x390, 0x3d0,
-  0xf8, 0xc8,
-  0x80,
-  0xf8, 0xf8, 0xf8, 0xf8, 0xf8, 0xe8, 0xf8, 0xd8, 0xf8, 0xc8, 0x108,
-  0x70, 0x70, 0x70, 0x68, 0x88, 0x70,
-  0x40, 0x70, 0x4f, 0x61, 0x37, 0x79,
-  0xc8, 0x278, 0x258, 0x1d8, 0x1c8, 0x188, 0x270,
-  0x180,
-  0x2e8, 0x270, 0x270, 0x2a0, 0x2a0, 0x2a4, 0x2fc,
-  0x76, 0x73, 0x76, 0x0, 0xd0, 0x80,
-};
+void Intro_SetupSwordAndIntroFlash() {  // 8cfe45
+  intro_sword_19 = 7;
+  intro_sword_20 = 0;
+  intro_sword_21 = 0;
+  intro_sword_ypos = -130;
 
-static const uint16 kEndingSprites_Y[] = {
-  0x158, 0x158, 0x138, 0x138, 0x140, 0x140, 0x150, 0x150, 0x120, 0x120, 0x120, 0x120,
-  0x60, 0x37,
-  0xc2, 0xc2, 0x16b, 0x16c, 0x16b, 0xb8, 0x16b,
-  0x80, 0x60, 0x146, 0x146, 0x1c6, 0x70, 0x70,
-  0x128, 0x128, 0x16f,
-  0xf5, 0xfc, 0x10d, 0x10d,
-  0x40, 0x40, 0x40,
-  0x150, 0x158,
-  0xf4,
-  0x120, 0x120, 0x120, 0x120, 0x120, 0x108, 0x100, 0xd8, 0xd8, 0xf0, 0xf0,
-  0x3c, 0x3c, 0x3c, 0x90, 0x80, 0x3c,
-  0x16c, 0x16c, 0x174, 0x174, 0x175, 0x175,
-  0x250, 0x2b0, 0x2b0, 0x2a0, 0x2b0, 0x2b0, 0x2b8,
-  0xd8,
-  0x24b, 0x1b0, 0x1c8, 0x1c8, 0x1b0, 0x230, 0x230,
-  0x8b, 0x83, 0x85, 0x2c, 0xf8, 0x100,
-};
+  Intro_PeriodicSwordAndIntroFlash();
+}
 
-static const uint8 kEndingSprites_Idx[17] = {
-  0, 12, 14, 21, 28, 31, 35, 38, 40, 41, 52, 58, 64, 71, 72, 79, 85
-};
+void Intro_PeriodicSwordAndIntroFlash() {  // 8cfe56
+  if (intro_sword_18)
+    intro_sword_18--;
+  SetBackdropcolorBlack();
+  if (intro_times_pal_flash) {
+    if ((intro_times_pal_flash & 3) != 0) {
+      (&COLDATA_copy0)[intro_sword_24] |= 0x1f;
+      intro_sword_24 = (intro_sword_24 == 2) ? 0 : intro_sword_24 + 1;
+    }
+    intro_times_pal_flash--;
+  }
+  OamEnt *oam = oam_buf + 0x52;
+  for (int j = 9; j >= 0; j--) {
+    static const uint8 kIntroSword_Char[10] = { 0, 2, 0x20, 0x22, 4, 6, 8, 0xa, 0xc, 0xe };
+    static const uint8 kIntroSword_X[10] = { 0x40, 0x40, 0x30, 0x50, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40 };
+    static const uint16 kIntroSword_Y[10] = { 0x10, 0x20, 0x28, 0x28, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80 };
+    bytewise_extended_oam[0x52 + j] = 2;
+    oam[j].charnum = kIntroSword_Char[j];
+    oam[j].flags = 0x21;
+    oam[j].x = kIntroSword_X[j];
+    uint16 y = intro_sword_ypos + kIntroSword_Y[j];
+    oam[j].y = ((y & 0xff00) ? 0xf8 : y) - 8;
+  }
 
-void Credits_PrepAndLoadSprites() {
+  if (intro_sword_ypos != 30) {
+    if (intro_sword_ypos == 0xffbe) {
+      sound_effect_1 = 1;
+    } else if (intro_sword_ypos == 14) {
+      WORD(intro_sword_24) = 0;
+      intro_times_pal_flash = 0x20;
+      sound_effect_1 = 0x2c;
+    }
+    intro_sword_ypos += 16;
+  }
+
+  switch (intro_sword_20 >> 1) {
+  case 0:
+    if (!intro_times_pal_flash && intro_sword_ypos == 30)
+      intro_sword_20 += 2;
+    break;
+  case 1: {
+    static const uint8 kSwordSparkle_Tab[8] = { 4, 4, 6, 6, 6, 4, 4 };
+
+    if (!intro_sword_18) {
+      intro_sword_19 -= 1;
+      if (sign8(intro_sword_19)) {
+        intro_sword_19 = 0;
+        intro_sword_18 = 2;
+        intro_sword_20 += 2;
+        return;
+      }
+      intro_sword_18 = kSwordSparkle_Tab[intro_sword_19];
+    }
+    static const uint8 kSwordSparkle_Char[7] = { 0x28, 0x37, 0x27, 0x36, 0x27, 0x37, 0x28 };
+    bytewise_extended_oam[0x50] = 0;
+    oam_buf[0x50].x = 0x44;
+    oam_buf[0x50].y = 0x43;
+    oam_buf[0x50].flags = 0x25;
+    oam_buf[0x50].charnum = kSwordSparkle_Char[intro_sword_19];
+    break;
+  }
+  case 2: {
+    static const uint8 kIntroSwordSparkle_Char[8] = { 0x26, 0x20, 0x24, 0x34, 0x25, 0x20, 0x35, 0x20 };
+    int k = intro_sword_19;
+    if (k >= 7)
+      return;
+    bytewise_extended_oam[0x50] = 0;
+    bytewise_extended_oam[0x51] = 0;
+    oam_buf[0x51].x = oam_buf[0x50].x = 0x42;
+
+    uint8 y = (intro_sword_21 < 0x50 ? intro_sword_21 : 0x4f) + intro_sword_ypos + 0x31;
+    oam_buf[0x50].y = y;
+    oam_buf[0x51].y = y + 8;
+    oam_buf[0x50].charnum = kIntroSwordSparkle_Char[k];
+    oam_buf[0x51].charnum = kIntroSwordSparkle_Char[k + 1];
+    oam_buf[0x51].flags = oam_buf[0x50].flags = 0x23;
+    if (intro_sword_18 == 0) {
+      intro_sword_21 += 4;
+      if (intro_sword_21 == 0x4 || intro_sword_21 == 0x48 || intro_sword_21 == 0x4c || intro_sword_21 == 0x58)
+        intro_sword_19 += 2;
+    }
+    break;
+  }
+  }
+}
+
+void Module1A_Credits() {  // 8e986e
+  oam_region_base[0] = 0x30;
+  oam_region_base[1] = 0x1d0;
+  oam_region_base[2] = 0x0;
+
+  kEndSequence_Funcs[submodule_index]();
+}
+
+void Credits_LoadNextScene_Overworld() {  // 8e9889
+  kEndSequence0_Funcs[subsubmodule_index]();
+  Credits_AddEndingSequenceText();
+}
+
+void Credits_LoadNextScene_Dungeon() {  // 8e9891
+  Credits_LoadScene_Dungeon();
+  Credits_AddEndingSequenceText();
+}
+
+void Credits_PrepAndLoadSprites() {  // 8e98b9
   for (int k = 15; k >= 0; k--) {
     SpritePrep_ResetProperties(k);
     sprite_state[k] = 0;
@@ -804,635 +1360,42 @@ init_sprites_1:
   }
 }
 
+void Credits_ScrollScene_Overworld() {  // 8e9958
 
+  for (int k = 15; k >= 0; k--)
+    if (sprite_delay_main[k])
+      sprite_delay_main[k]--;
 
-void Credits_LoadScene_Overworld_Overlay() {
-  Overworld_LoadOverlays2();
-  music_control = 0;
-  sound_effect_ambient = 0;
-  submodule_index--;
-  subsubmodule_index++;
-}
-void Credits_LoadScene_Overworld_LoadMap() {
-  Overworld_LoadAndBuildScreen();
-  Credits_PrepAndLoadSprites();
-  R16 = 0;
-  subsubmodule_index = 0;
-}
+  int i = submodule_index >> 1, k;
 
-static PlayerHandlerFunc *const kEndSequence0_Funcs[3] = {
-&Credits_LoadScene_Overworld_PrepGFX,
-&Credits_LoadScene_Overworld_Overlay,
-&Credits_LoadScene_Overworld_LoadMap,
-};
-
-void Credits_AddEndingSequenceText() {
-
-  uint16 *dst = vram_upload_data;
-  dst[0] = 0x60;
-  dst[1] = 0xfe47;
-  dst[2] = kEnding_MapData[159];
-  dst += 3;
-
-  const uint8 *curo = &kEnding0_Data[kEnding0_Offs[submodule_index >> 1]];
-  const uint8 *endo = &kEnding0_Data[kEnding0_Offs[(submodule_index >> 1) + 1]];
-  do {
-    dst[0] = WORD(curo[0]);
-    dst[1] = WORD(curo[2]);
-    int m = (dst[1] >> 9) & 0x7f;
-    dst += 2, curo += 4;
-    do {
-      *dst++ = kEnding_MapData[*curo++];
-    } while (--m >= 0);
-  } while (curo != endo);
-
-  vram_upload_offset = (char *)dst - (char *)vram_upload_data;
-  BYTE(*dst) = 0xff;
-  nmi_load_bg_from_vram = 1;
-}
-
-void Credits_AddNextAttribution() {
-  static const uint8 kEnding_Func9_Tab2[14] = { 1, 0, 2, 3, 10, 6, 5, 8, 11, 9, 7, 12, 13, 15 };
-  static const uint16 kEnding_Digits_ScrollY[14] = { 0x290, 0x298, 0x2a0, 0x2a8, 0x2b0, 0x2ba, 0x2c2, 0x2ca, 0x2d2, 0x2da, 0x2e2, 0x2ea, 0x2f2, 0x310 };
-  static const uint16 kEnding_Credits_DigitChar[2] = { 0x3ce6, 0x3cf6 };
-
-  uint16 *dst = vram_upload_data + (vram_upload_offset >> 1);
-
-  dst[0] = swap16(R16);
-  dst[1] = 0x3e40;
-  dst[2] = kEnding_MapData[159];
-  dst += 3;
-
-  if (R18 < 394) {
-    const uint8 *src = &kEnding_Credits_Text[kEnding_Credits_Offs[R18]];
-    if (*src != 0xff) {
-      *dst++ = swap16(R16 + *src++);
-      int n = *src++;
-      *dst++ = swap16(n);
-      n = (n + 1) >> 1;
-      do {
-        *dst++ = kEnding_MapData[*src++];
-      } while (--n);
-    }
-
-    if ((ending_which_dung & 1) || R18 * 2 == kEnding_Digits_ScrollY[ending_which_dung >> 1]) {
-      int t = kEnding_Credits_DigitChar[ending_which_dung & 1];
-      WORD(g_ram[0xce]) = t;
-
-      dst[0] = swap16(R16 + 0x19);
-      dst[1] = 0x500;
-
-      uint16 deaths = deaths_per_palace[kEnding_Func9_Tab2[ending_which_dung >> 1]];
-      if (deaths >= 1000)
-        deaths = 999;
-
-      dst[4] = t + deaths % 10, deaths /= 10;
-      dst[3] = t + deaths % 10, deaths /= 10;
-      dst[2] = t + deaths;
-      dst += 5;
-      ending_which_dung++;
-    }
+  link_x_vel = link_y_vel = 0;
+  if (R16 >= 0x40 && !(R16 & 1)) {
+    if (BG2VOFS_copy2 != kEnding1_TargetScrollY[i])
+      link_y_vel = kEnding1_Yvel[i];
+    if (BG2HOFS_copy2 != kEnding1_TargetScrollX[i])
+      link_x_vel = kEnding1_Xvel[i];
   }
 
-done:
-  R16 += 0x20;
-  if (!(R16 & 0x3ff))
-    R16 = (R16 & 0x6800) ^ 0x800;
-  vram_upload_offset = (char *)dst - (char *)vram_upload_data;
-  BYTE(*dst) = 0xff;
-  nmi_load_bg_from_vram = 1;
+  Credits_OperateScrollingAndTileMap();
+  Credits_HandleSceneFade();
 }
 
+void Credits_ScrollScene_Dungeon() {  // 8e99c5
+  for (int k = 15; k >= 0; k--)
+    if (sprite_delay_main[k])
+      sprite_delay_main[k]--;
 
-void Credits_LoadNextScene_Overworld() {
-  kEndSequence0_Funcs[subsubmodule_index]();
-  Credits_AddEndingSequenceText();
-}
-
-
-void Credits_HandleCameraScrollControl() {
-  if (link_y_vel != 0) {
-    uint8 yvel = link_y_vel;
-    BG2VOFS_copy2 += (int8)yvel;
-    uint16 *which = sign8(yvel) ? &overworld_unk1 : &overworld_unk1_neg;
-    *which += abs8(yvel);
-    if (!sign16(*which - 0x10)) {
-      *which -= 0x10;
-      overworld_screen_trans_dir_bits2 |= sign8(yvel) ? 8 : 4;
-    }
-    (sign8(yvel) ? overworld_unk1_neg : overworld_unk1) = -*which;
-    uint16 r4 = (int8)yvel, subp;
-    WORD(byte_7E069E[0]) = r4;
-    uint8 oi = BYTE(overlay_index);
-    if (oi != 0x97 && oi != 0x9d) {
-      if (oi == 0xb5 || oi == 0xbe) {
-        subp = (r4 & 3) << 14;
-        r4 >>= 2;
-        if (r4 >= 0x3000)
-          r4 |= 0xf000;
-      } else {
-        subp = (r4 & 1) << 15;
-        r4 >>= 1;
-        if (r4 >= 0x7000)
-          r4 |= 0xf000;
-      }
-      uint32 tmp = BG1VOFS_subpixel | BG1VOFS_copy2 << 16;
-      tmp += subp | r4 << 16;
-      BG1VOFS_subpixel = (uint16)(tmp);
-      BG1VOFS_copy2 = (uint16)(tmp >> 16);
-    }
+  int i = submodule_index >> 1;
+  if (R16 >= 0x40 && !(R16 & 1)) {
+    if (BG2VOFS_copy2 != kEnding1_TargetScrollY[i])
+      BG2VOFS_copy2 += kEnding1_Yvel[i];
+    if (BG2HOFS_copy2 != kEnding1_TargetScrollX[i])
+      BG2HOFS_copy2 += kEnding1_Xvel[i];
   }
-
-  if (link_x_vel != 0) {
-    uint8 xvel = link_x_vel;
-    BG2HOFS_copy2 += (int8)xvel;
-    uint16 *which = sign8(xvel) ? &overworld_unk3 : &overworld_unk3_neg;
-    *which += abs8(xvel);
-    if (!sign16(*which - 0x10)) {
-      *which -= 0x10;
-      overworld_screen_trans_dir_bits2 |= sign8(xvel) ? 2 : 1;
-    }
-    (sign8(xvel) ? overworld_unk3_neg : overworld_unk3) = -*which;
-
-    uint16 r4 = (int8)xvel, subp;
-    WORD(byte_7E069E[1]) = r4;
-    uint8 oi = BYTE(overlay_index);
-    if (oi != 0x97 && oi != 0x9d && r4 != 0) {
-      if (oi == 0x95 || oi == 0x9e) {
-        subp = (r4 & 3) << 14;
-        r4 >>= 2;
-        if (r4 >= 0x3000)
-          r4 |= 0xf000;
-      } else {
-        subp = (r4 & 1) << 15;
-        r4 >>= 1;
-        if (r4 >= 0x7000)
-          r4 |= 0xf000;
-      }
-      uint32 tmp = BG1HOFS_subpixel | BG1HOFS_copy2 << 16;
-      tmp += subp | r4 << 16;
-      BG1HOFS_subpixel = (uint16)(tmp), BG1HOFS_copy2 = (uint16)(tmp >> 16);
-    }
-  }
-
-  if (BYTE(overlay_index) == 0x9c) {
-    uint32 tmp = BG1VOFS_subpixel | BG1VOFS_copy2 << 16;
-    tmp -= 0x2000;
-    BG1VOFS_subpixel = (uint16)(tmp), BG1VOFS_copy2 = (uint16)(tmp >> 16) + WORD(byte_7E069E[0]);
-    BG1HOFS_copy2 = BG2HOFS_copy2;
-  } else if (BYTE(overlay_index) == 0x97 || BYTE(overlay_index) == 0x9d) {
-    uint32 tmp = BG1VOFS_subpixel | BG1VOFS_copy2 << 16;
-    tmp += 0x2000;
-    BG1VOFS_subpixel = (uint16)(tmp), BG1VOFS_copy2 = (uint16)(tmp >> 16);
-    tmp = BG1HOFS_subpixel | BG1HOFS_copy2 << 16;
-    tmp += 0x2000;
-    BG1HOFS_subpixel = (uint16)(tmp), BG1HOFS_copy2 = (uint16)(tmp >> 16);
-  }
-
-  if (dungeon_room_index == 0x181) {
-    BG1VOFS_copy2 = BG2VOFS_copy2 | 0x100;
-    BG1HOFS_copy2 = BG2HOFS_copy2;
-  }
+  Credits_HandleSceneFade();
 }
 
-void Credits_OperateScrollingAndTileMap() {
-  Credits_HandleCameraScrollControl();
-  if (BYTE(overworld_screen_trans_dir_bits2))
-    OverworldHandleMapScroll();
-}
-
-static PrepOamCoordsRet g_ending_coords;
-
-void Credits_SpriteDraw_Single(int k, uint8 a, uint8 j) {
-  static const DrawMultipleData kEndSequence_Dmd0[12] = {
-    { 0, -8, 0x072a, 2},
-    { 0, -8, 0x072a, 2},
-    { 0,  0, 0x4fca, 2},
-    { 0, -8, 0x072a, 2},
-    { 0, -8, 0x072a, 2},
-    { 0,  0, 0x0fca, 2},
-    {-2,  0, 0x0f77, 0},
-    { 0, -8, 0x072a, 2},
-    { 0,  0, 0x4fca, 2},
-    {-3,  0, 0x0f66, 0},
-    { 0, -8, 0x072a, 2},
-    { 0,  0, 0x4fca, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd1[6] = {
-    {14,  -7, 0x0d48, 2},
-    { 0,  -6, 0x0944, 2},
-    { 0,   0, 0x094e, 2},
-    {13, -14, 0x0d48, 2},
-    { 0,  -8, 0x0944, 2},
-    { 0,   0, 0x0946, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd2[16] = {
-    {-2, -16, 0x3d78, 0},
-    { 0, -24, 0x3d24, 2},
-    { 0, -16, 0x3dc2, 2},
-    {61, -16, 0x3777, 0},
-    {64, -24, 0x37c4, 2},
-    {64, -16, 0x77ca, 2},
-    { 0,  -6, 0x326c, 2},
-    {64,  -6, 0x326c, 2},
-    {-2, -16, 0x3d68, 0},
-    { 0, -24, 0x3d24, 2},
-    { 0, -16, 0x3dc2, 2},
-    {61, -16, 0x3766, 0},
-    {64, -24, 0x37c4, 2},
-    {64, -16, 0x77ca, 2},
-    { 0,  -6, 0x326c, 2},
-    {64,  -6, 0x326c, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd3[12] = {
-    { 0,  0, 0x0022, 2},
-    {48,  0, 0x0064, 2},
-    { 0, 10, 0x016c, 2},
-    {48, 10, 0x016c, 2},
-    { 0,  0, 0x0064, 2},
-    {48,  0, 0x0022, 2},
-    { 0, 10, 0x016c, 2},
-    {48, 10, 0x016c, 2},
-    { 0,  0, 0x0064, 2},
-    {48,  0, 0x0064, 2},
-    { 0, 10, 0x016c, 2},
-    {48, 10, 0x016c, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd4[8] = {
-    {10,   8, 0x8a32, 0},
-    {10,  16, 0x8a22, 0},
-    { 0, -10, 0x0800, 2},
-    { 0,   0, 0x082c, 2},
-    {10, -14, 0x0a22, 0},
-    {10,  -6, 0x0a32, 0},
-    {0, -10, 0x082a, 2},
-    {0,   0, 0x0828, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd5[10] = {
-    {10,  16, 0x8a05, 0},
-    {10,   8, 0x8a15, 0},
-    {-4,   2, 0x0a07, 2},
-    { 0,  -7, 0x0e00, 2},
-    { 0,   1, 0x0e02, 2},
-    {10, -20, 0x0a05, 0},
-    {10, -12, 0x0a15, 0},
-    {-7,   1, 0x4a07, 2},
-    { 0,  -7, 0x0e00, 2},
-    { 0,   1, 0x0e02, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd6[3] = {
-    {-6, -2, 0x0706, 2},
-    { 0, -9, 0x090e, 2},
-    { 0, -1, 0x0908, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd7[10] = {
-    {0, -10, 0x082a, 2},
-    {0,   0, 0x0828, 2},
-    {10,  16, 0x8a05, 0},
-    {10,   8, 0x8a15, 0},
-    {-4,   2, 0x0a07, 2},
-    { 0,  -7, 0x0e00, 2},
-    { 0,   1, 0x0e02, 2},
-    {10, -20, 0x0a05, 0},
-    {10, -12, 0x0a15, 0},
-    {-7,   1, 0x4a07, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd8[1] = {
-    {0, -19, 0x39af, 0},
-  };
-  static const DrawMultipleData kEndSequence_Dmd9[4] = {
-    {-16, -24, 0x3704, 2},
-    {-16, -16, 0x3764, 2},
-    {-16, -24, 0x3762, 2},
-    {-16, -16, 0x3764, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd10[4] = {
-    {0, 0, 0x0c0c, 2},
-    {0, 0, 0x0c0a, 2},
-    {0, 0, 0x0cc5, 2},
-    {0, 0, 0x0ce1, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd11[6] = {
-    {1,  4, 0x002a, 0},
-    {1, 12, 0x003a, 0},
-    {4,  0, 0x0026, 2},
-    {0,  9, 0x0024, 2},
-    {8,  9, 0x4024, 2},
-    {4, 20, 0x016c, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd12[21] = {
-    { 0, -7, 0x0d00, 2},
-    { 0, -7, 0x0d00, 2},
-    { 0,  0, 0x0d06, 2},
-    { 0, -7, 0x0d00, 2},
-    { 0, -7, 0x0d00, 2},
-    { 0,  0, 0x4d06, 2},
-    { 0, -8, 0x0d00, 2},
-    { 0, -8, 0x0d00, 2},
-    { 0,  0, 0x0d20, 2},
-    { 0, -8, 0x0d02, 2},
-    { 0, -8, 0x0d02, 2},
-    { 0,  0, 0x0d2c, 2},
-    {-3,  0, 0x0d2f, 0},
-    { 0, -7, 0x0d02, 2},
-    { 0,  0, 0x0d2c, 2},
-    {-5,  2, 0x0d2f, 0},
-    { 0, -8, 0x0d02, 2},
-    { 0,  0, 0x0d2c, 2},
-    {-5,  2, 0x0d3f, 0},
-    { 0, -8, 0x0d02, 2},
-    { 0,  0, 0x0d2c, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd13[16] = {
-    {0, -7, 0x0e00, 2},
-    {0,  1, 0x4e02, 2},
-    {0, -8, 0x0e00, 2},
-    {0,  1, 0x0e02, 2},
-    {0, -9, 0x0e00, 2},
-    {0,  1, 0x0e02, 2},
-    {0, -7, 0x0e00, 2},
-    {0,  1, 0x0e02, 2},
-    {0, -7, 0x0e00, 2},
-    {0,  1, 0x4e02, 2},
-    {0, -8, 0x0e00, 2},
-    {0,  1, 0x4e02, 2},
-    {0, -9, 0x0e00, 2},
-    {0,  1, 0x4e02, 2},
-    {0, -7, 0x0e00, 2},
-    {0,  1, 0x4e02, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd14[6] = {
-    {0, 0, 0, 0},
-    {0, 0, 0x34c7, 0},
-    {0, 0, 0x3480, 0},
-    {0, 0, 0x34b6, 0},
-    {0, 0, 0x34b7, 0},
-    {0, 0, 0x34a6, 0},
-  };
-  static const DrawMultipleData kEndSequence_Dmd15[6] = {
-    {-3, 17, 0x002b, 0},
-    {-3, 25, 0x003b, 0},
-    { 0,  0, 0x000e, 2},
-    {16,  0, 0x400e, 2},
-    { 0, 16, 0x002e, 2},
-    {16, 16, 0x402e, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd16[3] = {
-    { 8,  5, 0x0a04, 2},
-    { 0, 16, 0x0806, 2},
-    {16, 16, 0x4806, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd17[2] = {
-    {0,  0, 0x0000, 2},
-    {0, 11, 0x0002, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd18[2] = {
-    {0,  0, 0x000e, 2},
-    {0, 64, 0x006c, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd19[8] = {
-    {0, 0, 0x0882, 2},
-    {0, 7, 0x0a4e, 2},
-    {0, 0, 0x4880, 2},
-    {0, 7, 0x0a4e, 2},
-    {0, 0, 0x0882, 2},
-    {0, 7, 0x0a4e, 2},
-    {0, 0, 0x0880, 2},
-    {0, 7, 0x0a4e, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd20[6] = {
-    {-4,  1, 0x0c68, 0},
-    { 0, -8, 0x0c40, 2},
-    { 0,  1, 0x0c42, 2},
-    {-4,  1, 0x0c78, 0},
-    { 0, -8, 0x0c40, 2},
-    { 0,  1, 0x0c42, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd21[6] = {
-    {8,   5, 0x0679, 0},
-    {0, -10, 0x088e, 2},
-    {0,   0, 0x066e, 2},
-    {0, -10, 0x088e, 2},
-    {0, -10, 0x088e, 2},
-    {0,   0, 0x066e, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd22[6] = {
-    {11,  -3, 0x0869, 0},
-    { 0, -12, 0x0804, 2},
-    { 0,   0, 0x0860, 2},
-    {10,  -3, 0x0867, 0},
-    { 0, -12, 0x0804, 2},
-    { 0,   0, 0x0860, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd23[6] = {
-    {-2,  1, 0x0868, 0},
-    { 0, -8, 0x08c0, 2},
-    { 0,  0, 0x08c2, 2},
-    {-3,  1, 0x0878, 0},
-    { 0, -8, 0x08c0, 2},
-    { 0,  0, 0x08c2, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd24[4] = {
-    {0, -10, 0x084c, 2},
-    {0,   0, 0x0a6c, 2},
-    {0,  -9, 0x084c, 2},
-    {0,   0, 0x0aa8, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd25[4] = {
-    {0, -7, 0x084a, 2},
-    {0,  0, 0x0c6a, 2},
-    {0, -7, 0x084a, 2},
-    {0,  0, 0x0ca6, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd26[12] = {
-    {-18, -24, 0x39a4, 2},
-    {-16, -16, 0x39a8, 2},
-    {-18, -24, 0x39a4, 2},
-    {-18, -24, 0x39a4, 2},
-    {-16, -16, 0x39a6, 2},
-    {-18, -24, 0x39a4, 2},
-    { -6, -17, 0x392d, 0},
-    {-16, -24, 0x39a0, 2},
-    {-16, -16, 0x39aa, 2},
-    { -5, -17, 0x392c, 0},
-    {-16, -24, 0x39a0, 2},
-    {-16, -16, 0x39aa, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd27[6] = {
-    { 0,  -4, 0x30aa, 2},
-    { 0,  -4, 0x30aa, 2},
-    {-4,  -8, 0x3090, 0},
-    {12,  -8, 0x7090, 0},
-    {-6, -10, 0x3091, 0},
-    {14, -10, 0x7091, 0},
-  };
-  static const DrawMultipleData kEndSequence_Dmd28[8] = {
-    {0,  0, 0x0722, 2},
-    {0, -8, 0x09c2, 2},
-    {0,  0, 0x4722, 2},
-    {0, -8, 0x09c2, 2},
-    {0, -9, 0x09c4, 2},
-    {0,  0, 0x0722, 2},
-    {0, -9, 0x0924, 2},
-    {0,  0, 0x0722, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd29[3] = {
-    {-16, -12, 0x3f08, 2},
-    {  0, -12, 0x3f20, 2},
-    { 16, -12, 0x3f20, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd30[1] = {
-    {0, 0, 0x0086, 2},
-  };
-  static const DrawMultipleData kEndSequence_Dmd31[1] = {
-    {0, 0, 0x8060, 2},
-  };
-  static const DrawMultipleData *const kEndSequence_Dmds[] = {
-    kEndSequence_Dmd0, kEndSequence_Dmd1, kEndSequence_Dmd2, kEndSequence_Dmd3,
-    kEndSequence_Dmd4, kEndSequence_Dmd5, kEndSequence_Dmd6, kEndSequence_Dmd7,
-    kEndSequence_Dmd8, kEndSequence_Dmd9, kEndSequence_Dmd10, kEndSequence_Dmd11,
-    kEndSequence_Dmd12, kEndSequence_Dmd13, kEndSequence_Dmd14, kEndSequence_Dmd15,
-    kEndSequence_Dmd16, kEndSequence_Dmd17, kEndSequence_Dmd18, kEndSequence_Dmd19,
-    kEndSequence_Dmd20, kEndSequence_Dmd21, kEndSequence_Dmd22, kEndSequence_Dmd23,
-    kEndSequence_Dmd24, kEndSequence_Dmd25, kEndSequence_Dmd26, kEndSequence_Dmd27,
-    kEndSequence_Dmd28, kEndSequence_Dmd29, kEndSequence_Dmd30, kEndSequence_Dmd31
-  };
-
-  Oam_AllocateFromRegionA(a * 4);
-  Sprite_Get16BitCoords(k);
-  Sprite_DrawMultiple(k, kEndSequence_Dmds[j >> 1] + a * sprite_graphics[k], a, &g_ending_coords);
-}
-
-void Credits_SpriteDraw_SetShadowProp(int k, uint8 a) {
-  sprite_flags2[k] = a;
-  sprite_flags3[k] = 16;
-}
-
-void Credits_SpriteDraw_DrawShadow(int k) {
-  sprite_oam_flags[k] = 0x30;
-  Credits_SpriteDraw_SetShadowProp(k, 0);
-  Oam_AllocateFromRegionA(4);
-  SpriteDraw_Shadow(k, &g_ending_coords);
-}
-
-void EndSequence_DrawShadow2(int k) {
-  Credits_SpriteDraw_SetShadowProp(k, 0);
-  Oam_AllocateFromRegionA(4);
-  SpriteDraw_Shadow(k, &g_ending_coords);
-}
-
-
-void Credits_SpriteDraw_PreexistingSpriteDraw(int k, uint8 a) {
-  Oam_AllocateFromRegionA(a);
-  cur_object_index = k;
-  Sprite_Get16BitCoords(k);
-  SpriteActive_Main(k);
-}
-
-void Credits_SpriteDraw_CirclingBirds(int k) {
-  static const int8 kEnding_MoveSprite_Func1_TargetX[2] = { 0x20, -0x20 };
-  static const int8 kEnding_MoveSprite_Func1_TargetY[2] = { 0x10, -0x10 };
-
-  int j = sprite_D[k] & 1;
-  sprite_x_vel[k] += j ? -1 : 1;
-  if (sprite_x_vel[k] == (uint8)kEnding_MoveSprite_Func1_TargetX[j])
-    sprite_D[k]++;
-  if (!(frame_counter & 1)) {
-    j = sprite_head_dir[k] & 1;
-    sprite_y_vel[k] += j ? -1 : 1;
-    if (sprite_y_vel[k] == (uint8)kEnding_MoveSprite_Func1_TargetY[j])
-      sprite_head_dir[k]++;
-  }
-  Sprite_MoveXY(k);
-}
-
-void Ending_Func2(int k, uint8 ain) {
-  static const uint8 kEnding_Func2_Delay[27] = {
-  10, 10, 10, 10, 20, 8,   8,   0, 255, 12, 12, 12, 12, 12, 12, 30,
-   8,  4,  4,  4,  0, 0, 255, 255, 144,  4, 0,
-  };
-  static const int8 kEnding_Func2_Tab0[28] = {
-    0, 0, 1, 0, 1, 0, 2,  3,  0,  2, 0, 1, 0, 1, 0, 1,
-    2, 3, 4, 5, 6, 3, 0, -1, -1, -1, 2, 3,
-  };
-  sprite_oam_flags[k] = ain;
-  EndSequence_DrawShadow2(k);
-  int j = sprite_A[k];
-  if (!sprite_delay_main[k]) {
-    j++;
-    if (j == 8)
-      j = 6;
-    else if (j == 22)
-      j = 21;
-    else if (j == 28)
-      j = 27;
-    sprite_A[k] = j;
-    sprite_delay_main[k] = kEnding_Func2_Delay[j - 1];
-  }
-  uint8 a = kEnding_Func2_Tab0[j];
-  sprite_graphics[k] = (a == 255) ? frame_counter >> 3 & 1 : a;
-  if ((j < 5 || j >= 10 && j < 15) && !(frame_counter & 1))
-    sprite_y_lo[k]++;
-}
-
-void Credits_SpriteDraw_AddSparkle(int j_count, uint8 xb, uint8 yb) {
-  static const uint8 kEnding_Func3_Delay[6] = { 32, 4, 4, 4, 5, 6 };
-  sprite_C[0] = j_count;
-  for (int k = 0; k < j_count; k++) {
-    int j = sprite_graphics[k];
-    if (!sprite_delay_main[k]) {
-      if (++j >= 6) {
-        sprite_x_lo[k] = xb;
-        sprite_y_lo[k] = yb;
-        j = 0;
-      }
-      sprite_graphics[k] = j;
-      sprite_delay_main[k] = kEnding_Func3_Delay[j];
-    }
-    if (j)
-      Credits_SpriteDraw_Single(k, 1, 0x1c);
-  }
-}
-
-void Credits_SpriteDraw_ActivateAndRunSprite(int k, uint8 a) {
-  cur_object_index = k;
-  Oam_AllocateFromRegionA(a);
-  Sprite_Get16BitCoords(k);
-  uint8 bak0 = submodule_index;
-  submodule_index = 0;
-  sprite_state[k] = 9;
-  SpriteActive_Main(k);
-  submodule_index = bak0;
-}
-
-void Credits_SpriteDraw_MoveSquirrel(int k) {
-  static const int8 kEnding_Func5_Xvel[4] = { 32, 24, -32, -24 };
-  static const int8 kEnding_Func5_Yvel[4] = { 8, -8, -8, 8 };
-  if (sprite_delay_main[k] < 64) {
-    sprite_C[k] = sprite_C[k] + 1 & 3;
-    sprite_A[k]++;
-  } else {
-    int j = sprite_C[k];
-    sprite_x_vel[k] = kEnding_Func5_Xvel[j];
-    sprite_y_vel[k] = kEnding_Func5_Yvel[j];
-    Sprite_MoveXY(k);
-  }
-}
-
-void Credits_SpriteDraw_WalkLinkAwayFromPedestal(int k) {
-  static const uint16 kEnding_Func6_Dma[8] = { 0x16c, 0x16e, 0x170, 0x172, 0x16c, 0x174, 0x176, 0x178 };
-  if (!sprite_delay_main[k]) {
-    sprite_graphics[k] = sprite_graphics[k] + 1 & 7;
-    sprite_delay_main[k] = 4;
-  }
-  link_dma_graphics_index = kEnding_Func6_Dma[sprite_graphics[k]];
-  sprite_oam_flags[k] = 32;
-  Credits_SpriteDraw_Single(k, 2, 26);
-  EndSequence_DrawShadow2(k);
-  Sprite_MoveXY(k);
-}
-
-void Credits_HandleSceneFade() {
+void Credits_HandleSceneFade() {  // 8e9a2a
   static const uint16 kEnding1_3_Tab0[16] = { 0x300, 0x280, 0x250, 0x2e0, 0x280, 0x250, 0x2c0, 0x2c0, 0x250, 0x250, 0x280, 0x250, 0x480, 0x400, 0x250, 0x500 };
   static const uint8 kEndSequence_Case0_Tab1[12] = { 0x1e, 0x20, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x16, 0x16, 0x16, 0x16 };
   static const uint8 kEndSequence_Case0_Tab0[12] = { 6, 3, 2, 2, 2, 2, 2, 2, 6, 6, 6, 6 };
@@ -1888,82 +1851,520 @@ void Credits_HandleSceneFade() {
   BG1VOFS_copy = BG1VOFS_copy2;
 }
 
-static const uint16 kEnding1_TargetScrollY[16] = { 0x6f2, 0x210, 0x72c, 0xc00, 0x10c, 0xa9b, 0x10, 0x510, 0x89, 0xa8e, 0x222c, 0x2510, 0x826, 0x5c, 0x20a, 0x30 };
-static const uint16 kEnding1_TargetScrollX[16] = { 0x77f, 0x480, 0x193, 0xaa, 0x878, 0x847, 0x4fd, 0xc57, 0x40f, 0x478, 0xa00, 0x200, 0x201, 0xaa1, 0x26f, 0 };
-static const int8 kEnding1_Yvel[16] = { -1, -1, 1, -1, 1, 1, 0, 1, 0, -1, -1, 0, 0, 0, 1, -1 };
-static const int8 kEnding1_Xvel[16] = { 0, 0, -1, 0, 0, -1, 1, 0, -1, 0, 0, 0, 1, -1, 1, 0 };
+void Credits_SpriteDraw_DrawShadow(int k) {  // 8ea5f8
+  sprite_oam_flags[k] = 0x30;
+  Credits_SpriteDraw_SetShadowProp(k, 0);
+  Oam_AllocateFromRegionA(4);
+  SpriteDraw_Shadow(k, &g_ending_coords);
+}
 
-void Credits_ScrollScene_Overworld() {
+void EndSequence_DrawShadow2(int k) {  // 8ea5fd
+  Credits_SpriteDraw_SetShadowProp(k, 0);
+  Oam_AllocateFromRegionA(4);
+  SpriteDraw_Shadow(k, &g_ending_coords);
+}
 
-  for (int k = 15; k >= 0; k--)
-    if (sprite_delay_main[k])
-      sprite_delay_main[k]--;
+void Ending_Func2(int k, uint8 ain) {  // 8ea645
+  static const uint8 kEnding_Func2_Delay[27] = {
+  10, 10, 10, 10, 20, 8,   8,   0, 255, 12, 12, 12, 12, 12, 12, 30,
+   8,  4,  4,  4,  0, 0, 255, 255, 144,  4, 0,
+  };
+  static const int8 kEnding_Func2_Tab0[28] = {
+    0, 0, 1, 0, 1, 0, 2,  3,  0,  2, 0, 1, 0, 1, 0, 1,
+    2, 3, 4, 5, 6, 3, 0, -1, -1, -1, 2, 3,
+  };
+  sprite_oam_flags[k] = ain;
+  EndSequence_DrawShadow2(k);
+  int j = sprite_A[k];
+  if (!sprite_delay_main[k]) {
+    j++;
+    if (j == 8)
+      j = 6;
+    else if (j == 22)
+      j = 21;
+    else if (j == 28)
+      j = 27;
+    sprite_A[k] = j;
+    sprite_delay_main[k] = kEnding_Func2_Delay[j - 1];
+  }
+  uint8 a = kEnding_Func2_Tab0[j];
+  sprite_graphics[k] = (a == 255) ? frame_counter >> 3 & 1 : a;
+  if ((j < 5 || j >= 10 && j < 15) && !(frame_counter & 1))
+    sprite_y_lo[k]++;
+}
 
-  int i = submodule_index >> 1, k;
+void Credits_SpriteDraw_ActivateAndRunSprite(int k, uint8 a) {  // 8ea694
+  cur_object_index = k;
+  Oam_AllocateFromRegionA(a);
+  Sprite_Get16BitCoords(k);
+  uint8 bak0 = submodule_index;
+  submodule_index = 0;
+  sprite_state[k] = 9;
+  SpriteActive_Main(k);
+  submodule_index = bak0;
+}
 
-  link_x_vel = link_y_vel = 0;
-  if (R16 >= 0x40 && !(R16 & 1)) {
-    if (BG2VOFS_copy2 != kEnding1_TargetScrollY[i])
-      link_y_vel = kEnding1_Yvel[i];
-    if (BG2HOFS_copy2 != kEnding1_TargetScrollX[i])
-      link_x_vel = kEnding1_Xvel[i];
+void Credits_SpriteDraw_PreexistingSpriteDraw(int k, uint8 a) {  // 8ea6b3
+  Oam_AllocateFromRegionA(a);
+  cur_object_index = k;
+  Sprite_Get16BitCoords(k);
+  SpriteActive_Main(k);
+}
+
+void Credits_SpriteDraw_Single(int k, uint8 a, uint8 j) {  // 8ea703
+  static const DrawMultipleData kEndSequence_Dmd0[12] = {
+    { 0, -8, 0x072a, 2},
+    { 0, -8, 0x072a, 2},
+    { 0,  0, 0x4fca, 2},
+    { 0, -8, 0x072a, 2},
+    { 0, -8, 0x072a, 2},
+    { 0,  0, 0x0fca, 2},
+    {-2,  0, 0x0f77, 0},
+    { 0, -8, 0x072a, 2},
+    { 0,  0, 0x4fca, 2},
+    {-3,  0, 0x0f66, 0},
+    { 0, -8, 0x072a, 2},
+    { 0,  0, 0x4fca, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd1[6] = {
+    {14,  -7, 0x0d48, 2},
+    { 0,  -6, 0x0944, 2},
+    { 0,   0, 0x094e, 2},
+    {13, -14, 0x0d48, 2},
+    { 0,  -8, 0x0944, 2},
+    { 0,   0, 0x0946, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd2[16] = {
+    {-2, -16, 0x3d78, 0},
+    { 0, -24, 0x3d24, 2},
+    { 0, -16, 0x3dc2, 2},
+    {61, -16, 0x3777, 0},
+    {64, -24, 0x37c4, 2},
+    {64, -16, 0x77ca, 2},
+    { 0,  -6, 0x326c, 2},
+    {64,  -6, 0x326c, 2},
+    {-2, -16, 0x3d68, 0},
+    { 0, -24, 0x3d24, 2},
+    { 0, -16, 0x3dc2, 2},
+    {61, -16, 0x3766, 0},
+    {64, -24, 0x37c4, 2},
+    {64, -16, 0x77ca, 2},
+    { 0,  -6, 0x326c, 2},
+    {64,  -6, 0x326c, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd3[12] = {
+    { 0,  0, 0x0022, 2},
+    {48,  0, 0x0064, 2},
+    { 0, 10, 0x016c, 2},
+    {48, 10, 0x016c, 2},
+    { 0,  0, 0x0064, 2},
+    {48,  0, 0x0022, 2},
+    { 0, 10, 0x016c, 2},
+    {48, 10, 0x016c, 2},
+    { 0,  0, 0x0064, 2},
+    {48,  0, 0x0064, 2},
+    { 0, 10, 0x016c, 2},
+    {48, 10, 0x016c, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd4[8] = {
+    {10,   8, 0x8a32, 0},
+    {10,  16, 0x8a22, 0},
+    { 0, -10, 0x0800, 2},
+    { 0,   0, 0x082c, 2},
+    {10, -14, 0x0a22, 0},
+    {10,  -6, 0x0a32, 0},
+    {0, -10, 0x082a, 2},
+    {0,   0, 0x0828, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd5[10] = {
+    {10,  16, 0x8a05, 0},
+    {10,   8, 0x8a15, 0},
+    {-4,   2, 0x0a07, 2},
+    { 0,  -7, 0x0e00, 2},
+    { 0,   1, 0x0e02, 2},
+    {10, -20, 0x0a05, 0},
+    {10, -12, 0x0a15, 0},
+    {-7,   1, 0x4a07, 2},
+    { 0,  -7, 0x0e00, 2},
+    { 0,   1, 0x0e02, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd6[3] = {
+    {-6, -2, 0x0706, 2},
+    { 0, -9, 0x090e, 2},
+    { 0, -1, 0x0908, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd7[10] = {
+    {0, -10, 0x082a, 2},
+    {0,   0, 0x0828, 2},
+    {10,  16, 0x8a05, 0},
+    {10,   8, 0x8a15, 0},
+    {-4,   2, 0x0a07, 2},
+    { 0,  -7, 0x0e00, 2},
+    { 0,   1, 0x0e02, 2},
+    {10, -20, 0x0a05, 0},
+    {10, -12, 0x0a15, 0},
+    {-7,   1, 0x4a07, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd8[1] = {
+    {0, -19, 0x39af, 0},
+  };
+  static const DrawMultipleData kEndSequence_Dmd9[4] = {
+    {-16, -24, 0x3704, 2},
+    {-16, -16, 0x3764, 2},
+    {-16, -24, 0x3762, 2},
+    {-16, -16, 0x3764, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd10[4] = {
+    {0, 0, 0x0c0c, 2},
+    {0, 0, 0x0c0a, 2},
+    {0, 0, 0x0cc5, 2},
+    {0, 0, 0x0ce1, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd11[6] = {
+    {1,  4, 0x002a, 0},
+    {1, 12, 0x003a, 0},
+    {4,  0, 0x0026, 2},
+    {0,  9, 0x0024, 2},
+    {8,  9, 0x4024, 2},
+    {4, 20, 0x016c, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd12[21] = {
+    { 0, -7, 0x0d00, 2},
+    { 0, -7, 0x0d00, 2},
+    { 0,  0, 0x0d06, 2},
+    { 0, -7, 0x0d00, 2},
+    { 0, -7, 0x0d00, 2},
+    { 0,  0, 0x4d06, 2},
+    { 0, -8, 0x0d00, 2},
+    { 0, -8, 0x0d00, 2},
+    { 0,  0, 0x0d20, 2},
+    { 0, -8, 0x0d02, 2},
+    { 0, -8, 0x0d02, 2},
+    { 0,  0, 0x0d2c, 2},
+    {-3,  0, 0x0d2f, 0},
+    { 0, -7, 0x0d02, 2},
+    { 0,  0, 0x0d2c, 2},
+    {-5,  2, 0x0d2f, 0},
+    { 0, -8, 0x0d02, 2},
+    { 0,  0, 0x0d2c, 2},
+    {-5,  2, 0x0d3f, 0},
+    { 0, -8, 0x0d02, 2},
+    { 0,  0, 0x0d2c, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd13[16] = {
+    {0, -7, 0x0e00, 2},
+    {0,  1, 0x4e02, 2},
+    {0, -8, 0x0e00, 2},
+    {0,  1, 0x0e02, 2},
+    {0, -9, 0x0e00, 2},
+    {0,  1, 0x0e02, 2},
+    {0, -7, 0x0e00, 2},
+    {0,  1, 0x0e02, 2},
+    {0, -7, 0x0e00, 2},
+    {0,  1, 0x4e02, 2},
+    {0, -8, 0x0e00, 2},
+    {0,  1, 0x4e02, 2},
+    {0, -9, 0x0e00, 2},
+    {0,  1, 0x4e02, 2},
+    {0, -7, 0x0e00, 2},
+    {0,  1, 0x4e02, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd14[6] = {
+    {0, 0, 0, 0},
+    {0, 0, 0x34c7, 0},
+    {0, 0, 0x3480, 0},
+    {0, 0, 0x34b6, 0},
+    {0, 0, 0x34b7, 0},
+    {0, 0, 0x34a6, 0},
+  };
+  static const DrawMultipleData kEndSequence_Dmd15[6] = {
+    {-3, 17, 0x002b, 0},
+    {-3, 25, 0x003b, 0},
+    { 0,  0, 0x000e, 2},
+    {16,  0, 0x400e, 2},
+    { 0, 16, 0x002e, 2},
+    {16, 16, 0x402e, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd16[3] = {
+    { 8,  5, 0x0a04, 2},
+    { 0, 16, 0x0806, 2},
+    {16, 16, 0x4806, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd17[2] = {
+    {0,  0, 0x0000, 2},
+    {0, 11, 0x0002, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd18[2] = {
+    {0,  0, 0x000e, 2},
+    {0, 64, 0x006c, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd19[8] = {
+    {0, 0, 0x0882, 2},
+    {0, 7, 0x0a4e, 2},
+    {0, 0, 0x4880, 2},
+    {0, 7, 0x0a4e, 2},
+    {0, 0, 0x0882, 2},
+    {0, 7, 0x0a4e, 2},
+    {0, 0, 0x0880, 2},
+    {0, 7, 0x0a4e, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd20[6] = {
+    {-4,  1, 0x0c68, 0},
+    { 0, -8, 0x0c40, 2},
+    { 0,  1, 0x0c42, 2},
+    {-4,  1, 0x0c78, 0},
+    { 0, -8, 0x0c40, 2},
+    { 0,  1, 0x0c42, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd21[6] = {
+    {8,   5, 0x0679, 0},
+    {0, -10, 0x088e, 2},
+    {0,   0, 0x066e, 2},
+    {0, -10, 0x088e, 2},
+    {0, -10, 0x088e, 2},
+    {0,   0, 0x066e, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd22[6] = {
+    {11,  -3, 0x0869, 0},
+    { 0, -12, 0x0804, 2},
+    { 0,   0, 0x0860, 2},
+    {10,  -3, 0x0867, 0},
+    { 0, -12, 0x0804, 2},
+    { 0,   0, 0x0860, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd23[6] = {
+    {-2,  1, 0x0868, 0},
+    { 0, -8, 0x08c0, 2},
+    { 0,  0, 0x08c2, 2},
+    {-3,  1, 0x0878, 0},
+    { 0, -8, 0x08c0, 2},
+    { 0,  0, 0x08c2, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd24[4] = {
+    {0, -10, 0x084c, 2},
+    {0,   0, 0x0a6c, 2},
+    {0,  -9, 0x084c, 2},
+    {0,   0, 0x0aa8, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd25[4] = {
+    {0, -7, 0x084a, 2},
+    {0,  0, 0x0c6a, 2},
+    {0, -7, 0x084a, 2},
+    {0,  0, 0x0ca6, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd26[12] = {
+    {-18, -24, 0x39a4, 2},
+    {-16, -16, 0x39a8, 2},
+    {-18, -24, 0x39a4, 2},
+    {-18, -24, 0x39a4, 2},
+    {-16, -16, 0x39a6, 2},
+    {-18, -24, 0x39a4, 2},
+    { -6, -17, 0x392d, 0},
+    {-16, -24, 0x39a0, 2},
+    {-16, -16, 0x39aa, 2},
+    { -5, -17, 0x392c, 0},
+    {-16, -24, 0x39a0, 2},
+    {-16, -16, 0x39aa, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd27[6] = {
+    { 0,  -4, 0x30aa, 2},
+    { 0,  -4, 0x30aa, 2},
+    {-4,  -8, 0x3090, 0},
+    {12,  -8, 0x7090, 0},
+    {-6, -10, 0x3091, 0},
+    {14, -10, 0x7091, 0},
+  };
+  static const DrawMultipleData kEndSequence_Dmd28[8] = {
+    {0,  0, 0x0722, 2},
+    {0, -8, 0x09c2, 2},
+    {0,  0, 0x4722, 2},
+    {0, -8, 0x09c2, 2},
+    {0, -9, 0x09c4, 2},
+    {0,  0, 0x0722, 2},
+    {0, -9, 0x0924, 2},
+    {0,  0, 0x0722, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd29[3] = {
+    {-16, -12, 0x3f08, 2},
+    {  0, -12, 0x3f20, 2},
+    { 16, -12, 0x3f20, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd30[1] = {
+    {0, 0, 0x0086, 2},
+  };
+  static const DrawMultipleData kEndSequence_Dmd31[1] = {
+    {0, 0, 0x8060, 2},
+  };
+  static const DrawMultipleData *const kEndSequence_Dmds[] = {
+    kEndSequence_Dmd0, kEndSequence_Dmd1, kEndSequence_Dmd2, kEndSequence_Dmd3,
+    kEndSequence_Dmd4, kEndSequence_Dmd5, kEndSequence_Dmd6, kEndSequence_Dmd7,
+    kEndSequence_Dmd8, kEndSequence_Dmd9, kEndSequence_Dmd10, kEndSequence_Dmd11,
+    kEndSequence_Dmd12, kEndSequence_Dmd13, kEndSequence_Dmd14, kEndSequence_Dmd15,
+    kEndSequence_Dmd16, kEndSequence_Dmd17, kEndSequence_Dmd18, kEndSequence_Dmd19,
+    kEndSequence_Dmd20, kEndSequence_Dmd21, kEndSequence_Dmd22, kEndSequence_Dmd23,
+    kEndSequence_Dmd24, kEndSequence_Dmd25, kEndSequence_Dmd26, kEndSequence_Dmd27,
+    kEndSequence_Dmd28, kEndSequence_Dmd29, kEndSequence_Dmd30, kEndSequence_Dmd31
+  };
+
+  Oam_AllocateFromRegionA(a * 4);
+  Sprite_Get16BitCoords(k);
+  Sprite_DrawMultiple(k, kEndSequence_Dmds[j >> 1] + a * sprite_graphics[k], a, &g_ending_coords);
+}
+
+void Credits_SpriteDraw_SetShadowProp(int k, uint8 a) {  // 8eaca2
+  sprite_flags2[k] = a;
+  sprite_flags3[k] = 16;
+}
+
+void Credits_SpriteDraw_AddSparkle(int j_count, uint8 xb, uint8 yb) {  // 8eace5
+  static const uint8 kEnding_Func3_Delay[6] = { 32, 4, 4, 4, 5, 6 };
+  sprite_C[0] = j_count;
+  for (int k = 0; k < j_count; k++) {
+    int j = sprite_graphics[k];
+    if (!sprite_delay_main[k]) {
+      if (++j >= 6) {
+        sprite_x_lo[k] = xb;
+        sprite_y_lo[k] = yb;
+        j = 0;
+      }
+      sprite_graphics[k] = j;
+      sprite_delay_main[k] = kEnding_Func3_Delay[j];
+    }
+    if (j)
+      Credits_SpriteDraw_Single(k, 1, 0x1c);
+  }
+}
+
+void Credits_SpriteDraw_WalkLinkAwayFromPedestal(int k) {  // 8eadf7
+  static const uint16 kEnding_Func6_Dma[8] = { 0x16c, 0x16e, 0x170, 0x172, 0x16c, 0x174, 0x176, 0x178 };
+  if (!sprite_delay_main[k]) {
+    sprite_graphics[k] = sprite_graphics[k] + 1 & 7;
+    sprite_delay_main[k] = 4;
+  }
+  link_dma_graphics_index = kEnding_Func6_Dma[sprite_graphics[k]];
+  sprite_oam_flags[k] = 32;
+  Credits_SpriteDraw_Single(k, 2, 26);
+  EndSequence_DrawShadow2(k);
+  Sprite_MoveXY(k);
+}
+
+void Credits_SpriteDraw_MoveSquirrel(int k) {  // 8eae35
+  static const int8 kEnding_Func5_Xvel[4] = { 32, 24, -32, -24 };
+  static const int8 kEnding_Func5_Yvel[4] = { 8, -8, -8, 8 };
+  if (sprite_delay_main[k] < 64) {
+    sprite_C[k] = sprite_C[k] + 1 & 3;
+    sprite_A[k]++;
+  } else {
+    int j = sprite_C[k];
+    sprite_x_vel[k] = kEnding_Func5_Xvel[j];
+    sprite_y_vel[k] = kEnding_Func5_Yvel[j];
+    Sprite_MoveXY(k);
+  }
+}
+
+void Credits_SpriteDraw_CirclingBirds(int k) {  // 8eae63
+  static const int8 kEnding_MoveSprite_Func1_TargetX[2] = { 0x20, -0x20 };
+  static const int8 kEnding_MoveSprite_Func1_TargetY[2] = { 0x10, -0x10 };
+
+  int j = sprite_D[k] & 1;
+  sprite_x_vel[k] += j ? -1 : 1;
+  if (sprite_x_vel[k] == (uint8)kEnding_MoveSprite_Func1_TargetX[j])
+    sprite_D[k]++;
+  if (!(frame_counter & 1)) {
+    j = sprite_head_dir[k] & 1;
+    sprite_y_vel[k] += j ? -1 : 1;
+    if (sprite_y_vel[k] == (uint8)kEnding_MoveSprite_Func1_TargetY[j])
+      sprite_head_dir[k]++;
+  }
+  Sprite_MoveXY(k);
+}
+
+void Credits_HandleCameraScrollControl() {  // 8eaea6
+  if (link_y_vel != 0) {
+    uint8 yvel = link_y_vel;
+    BG2VOFS_copy2 += (int8)yvel;
+    uint16 *which = sign8(yvel) ? &overworld_unk1 : &overworld_unk1_neg;
+    *which += abs8(yvel);
+    if (!sign16(*which - 0x10)) {
+      *which -= 0x10;
+      overworld_screen_trans_dir_bits2 |= sign8(yvel) ? 8 : 4;
+    }
+    (sign8(yvel) ? overworld_unk1_neg : overworld_unk1) = -*which;
+    uint16 r4 = (int8)yvel, subp;
+    WORD(byte_7E069E[0]) = r4;
+    uint8 oi = BYTE(overlay_index);
+    if (oi != 0x97 && oi != 0x9d) {
+      if (oi == 0xb5 || oi == 0xbe) {
+        subp = (r4 & 3) << 14;
+        r4 >>= 2;
+        if (r4 >= 0x3000)
+          r4 |= 0xf000;
+      } else {
+        subp = (r4 & 1) << 15;
+        r4 >>= 1;
+        if (r4 >= 0x7000)
+          r4 |= 0xf000;
+      }
+      uint32 tmp = BG1VOFS_subpixel | BG1VOFS_copy2 << 16;
+      tmp += subp | r4 << 16;
+      BG1VOFS_subpixel = (uint16)(tmp);
+      BG1VOFS_copy2 = (uint16)(tmp >> 16);
+    }
   }
 
-  Credits_OperateScrollingAndTileMap();
-  Credits_HandleSceneFade();
-}
+  if (link_x_vel != 0) {
+    uint8 xvel = link_x_vel;
+    BG2HOFS_copy2 += (int8)xvel;
+    uint16 *which = sign8(xvel) ? &overworld_unk3 : &overworld_unk3_neg;
+    *which += abs8(xvel);
+    if (!sign16(*which - 0x10)) {
+      *which -= 0x10;
+      overworld_screen_trans_dir_bits2 |= sign8(xvel) ? 2 : 1;
+    }
+    (sign8(xvel) ? overworld_unk3_neg : overworld_unk3) = -*which;
 
-void Credits_LoadNextScene_Dungeon() {
-  Credits_LoadScene_Dungeon();
-  Credits_AddEndingSequenceText();
-}
-void Credits_ScrollScene_Dungeon() {
-  for (int k = 15; k >= 0; k--)
-    if (sprite_delay_main[k])
-      sprite_delay_main[k]--;
-
-  int i = submodule_index >> 1;
-  if (R16 >= 0x40 && !(R16 & 1)) {
-    if (BG2VOFS_copy2 != kEnding1_TargetScrollY[i])
-      BG2VOFS_copy2 += kEnding1_Yvel[i];
-    if (BG2HOFS_copy2 != kEnding1_TargetScrollX[i])
-      BG2HOFS_copy2 += kEnding1_Xvel[i];
+    uint16 r4 = (int8)xvel, subp;
+    WORD(byte_7E069E[1]) = r4;
+    uint8 oi = BYTE(overlay_index);
+    if (oi != 0x97 && oi != 0x9d && r4 != 0) {
+      if (oi == 0x95 || oi == 0x9e) {
+        subp = (r4 & 3) << 14;
+        r4 >>= 2;
+        if (r4 >= 0x3000)
+          r4 |= 0xf000;
+      } else {
+        subp = (r4 & 1) << 15;
+        r4 >>= 1;
+        if (r4 >= 0x7000)
+          r4 |= 0xf000;
+      }
+      uint32 tmp = BG1HOFS_subpixel | BG1HOFS_copy2 << 16;
+      tmp += subp | r4 << 16;
+      BG1HOFS_subpixel = (uint16)(tmp), BG1HOFS_copy2 = (uint16)(tmp >> 16);
+    }
   }
-  Credits_HandleSceneFade();
+
+  if (BYTE(overlay_index) == 0x9c) {
+    uint32 tmp = BG1VOFS_subpixel | BG1VOFS_copy2 << 16;
+    tmp -= 0x2000;
+    BG1VOFS_subpixel = (uint16)(tmp), BG1VOFS_copy2 = (uint16)(tmp >> 16) + WORD(byte_7E069E[0]);
+    BG1HOFS_copy2 = BG2HOFS_copy2;
+  } else if (BYTE(overlay_index) == 0x97 || BYTE(overlay_index) == 0x9d) {
+    uint32 tmp = BG1VOFS_subpixel | BG1VOFS_copy2 << 16;
+    tmp += 0x2000;
+    BG1VOFS_subpixel = (uint16)(tmp), BG1VOFS_copy2 = (uint16)(tmp >> 16);
+    tmp = BG1HOFS_subpixel | BG1HOFS_copy2 << 16;
+    tmp += 0x2000;
+    BG1HOFS_subpixel = (uint16)(tmp), BG1HOFS_copy2 = (uint16)(tmp >> 16);
+  }
+
+  if (dungeon_room_index == 0x181) {
+    BG1VOFS_copy2 = BG2VOFS_copy2 | 0x100;
+    BG1HOFS_copy2 = BG2HOFS_copy2;
+  }
 }
 
-void Credits_LoadCoolBackground() {
-  main_tile_theme_index = 33;
-  aux_tile_theme_index = 59;
-  sprite_graphics_index = 45;
-  InitializeTilesets();
-  BYTE(overworld_screen_index) = 0x5b;
-  Overworld_LoadPalettes(GetOverworldBgPalette(BYTE(overworld_screen_index)), 0x13);
-  overworld_palette_aux2_bp5to7_hi = 3;
-  Palette_Load_OWBG2();
-  Overworld_CopyPalettesToCache();
-  Overworld_LoadOverlays2();
-  BG1VOFS_copy2 = 0;
-  BG1HOFS_copy2 = 0;
-  submodule_index--;
-}
-
-void Credits_InitializePolyhedral() {
-  misc_sprites_graphics_index = 8;
-  LoadCommonSprites_2();
-  Intro_InitGfx_Helper();
-  poly_config1 = 0;
-  intro_sprite_isinited[0] = 1;
-  intro_sprite_isinited[1] = 1;
-  intro_sprite_isinited[2] = 1;
-  intro_sprite_subtype[0] = 7;
-  intro_sprite_subtype[1] = 7;
-  intro_sprite_subtype[2] = 7;
-  INIDISP_copy = 15;
-  submodule_index++;
-}
-
-void EndSequence_32() {
+void EndSequence_32() {  // 8ebc6d
   EnableForceBlank();
   EraseTileMaps_triforce();
   TransferFontToVRAM();
@@ -2017,24 +2418,7 @@ void EndSequence_32() {
   BG1VOFS_copy = BG1VOFS_copy2;
 }
 
-void Credits_AnimateTheTriangles() {
-  intro_frame_ctr++;
-  is_nmi_thread_active = 1;
-  if (!intro_did_run_step) {
-    poly_b += 3;
-    poly_a += 1;
-    intro_did_run_step = 1;
-  }
-  Scene_AnimateEverySprite();
-}
-
-void Credits_BrightenTriangles() {
-  if (!(frame_counter & 15) && ++INIDISP_copy == 15)
-    submodule_index++;
-  Credits_AnimateTheTriangles();
-}
-
-void Credits_FadeOutFixedCol() {
+void Credits_FadeOutFixedCol() {  // 8ebd66
   if (--subsubmodule_index == 0) {
     subsubmodule_index = 16;
     if (COLDATA_copy0 != 32) {
@@ -2047,7 +2431,7 @@ void Credits_FadeOutFixedCol() {
   }
 }
 
-void Credits_FadeColorAndBeginAnimating() {
+void Credits_FadeColorAndBeginAnimating() {  // 8ebd8b
   Credits_FadeOutFixedCol();
   nmi_disable_core_updates = 1;
   Credits_AnimateTheTriangles();
@@ -2074,7 +2458,91 @@ void Credits_FadeColorAndBeginAnimating() {
   BG1HOFS_copy = BG1HOFS_copy2;
   BG1VOFS_copy = BG1VOFS_copy2;
 }
-void Credits_StopCreditsScroll() {
+
+void Credits_AddNextAttribution() {  // 8ebe24
+  static const uint8 kEnding_Func9_Tab2[14] = { 1, 0, 2, 3, 10, 6, 5, 8, 11, 9, 7, 12, 13, 15 };
+  static const uint16 kEnding_Digits_ScrollY[14] = { 0x290, 0x298, 0x2a0, 0x2a8, 0x2b0, 0x2ba, 0x2c2, 0x2ca, 0x2d2, 0x2da, 0x2e2, 0x2ea, 0x2f2, 0x310 };
+  static const uint16 kEnding_Credits_DigitChar[2] = { 0x3ce6, 0x3cf6 };
+
+  uint16 *dst = vram_upload_data + (vram_upload_offset >> 1);
+
+  dst[0] = swap16(R16);
+  dst[1] = 0x3e40;
+  dst[2] = kEnding_MapData[159];
+  dst += 3;
+
+  if (R18 < 394) {
+    const uint8 *src = &kEnding_Credits_Text[kEnding_Credits_Offs[R18]];
+    if (*src != 0xff) {
+      *dst++ = swap16(R16 + *src++);
+      int n = *src++;
+      *dst++ = swap16(n);
+      n = (n + 1) >> 1;
+      do {
+        *dst++ = kEnding_MapData[*src++];
+      } while (--n);
+    }
+
+    if ((ending_which_dung & 1) || R18 * 2 == kEnding_Digits_ScrollY[ending_which_dung >> 1]) {
+      int t = kEnding_Credits_DigitChar[ending_which_dung & 1];
+      WORD(g_ram[0xce]) = t;
+
+      dst[0] = swap16(R16 + 0x19);
+      dst[1] = 0x500;
+
+      uint16 deaths = deaths_per_palace[kEnding_Func9_Tab2[ending_which_dung >> 1]];
+      if (deaths >= 1000)
+        deaths = 999;
+
+      dst[4] = t + deaths % 10, deaths /= 10;
+      dst[3] = t + deaths % 10, deaths /= 10;
+      dst[2] = t + deaths;
+      dst += 5;
+      ending_which_dung++;
+    }
+  }
+
+done:
+  R16 += 0x20;
+  if (!(R16 & 0x3ff))
+    R16 = (R16 & 0x6800) ^ 0x800;
+  vram_upload_offset = (char *)dst - (char *)vram_upload_data;
+  BYTE(*dst) = 0xff;
+  nmi_load_bg_from_vram = 1;
+}
+
+void Credits_AddEndingSequenceText() {  // 8ec303
+
+  uint16 *dst = vram_upload_data;
+  dst[0] = 0x60;
+  dst[1] = 0xfe47;
+  dst[2] = kEnding_MapData[159];
+  dst += 3;
+
+  const uint8 *curo = &kEnding0_Data[kEnding0_Offs[submodule_index >> 1]];
+  const uint8 *endo = &kEnding0_Data[kEnding0_Offs[(submodule_index >> 1) + 1]];
+  do {
+    dst[0] = WORD(curo[0]);
+    dst[1] = WORD(curo[2]);
+    int m = (dst[1] >> 9) & 0x7f;
+    dst += 2, curo += 4;
+    do {
+      *dst++ = kEnding_MapData[*curo++];
+    } while (--m >= 0);
+  } while (curo != endo);
+
+  vram_upload_offset = (char *)dst - (char *)vram_upload_data;
+  BYTE(*dst) = 0xff;
+  nmi_load_bg_from_vram = 1;
+}
+
+void Credits_BrightenTriangles() {  // 8ec37c
+  if (!(frame_counter & 15) && ++INIDISP_copy == 15)
+    submodule_index++;
+  Credits_AnimateTheTriangles();
+}
+
+void Credits_StopCreditsScroll() {  // 8ec391
   if (!--BYTE(R16)) {
     darkening_or_lightening_screen = 0;
     palette_filter_countdown = 0;
@@ -2085,7 +2553,8 @@ void Credits_StopCreditsScroll() {
   }
   Credits_AnimateTheTriangles();
 }
-void Credits_FadeAndDisperseTriangles() {
+
+void Credits_FadeAndDisperseTriangles() {  // 8ec3b8
   BYTE(R16)--;
   if (!BYTE(R18)) {
     ApplyPaletteFilter_bounce();
@@ -2103,9 +2572,16 @@ void Credits_FadeAndDisperseTriangles() {
   PaletteFilter_WishPonds_Inner();
 }
 
+void Credits_FadeInTheEnd() {  // 8ec3d5
+  if (!(frame_counter & 7)) {
+    PaletteFilter_SP5F();
+    if (!BYTE(palette_filter_countdown))
+      submodule_index++;;
+  }
+  Credits_HangForever();
+}
 
-
-void Credits_HangForever() {
+void Credits_HangForever() {  // 8ec41a
   static const OamEntSigned kEndSequence37_Oams[4] = {
     {-96, -72, 0x00, 0x3b},
     {-80, -72, 0x02, 0x3b},
@@ -2116,531 +2592,17 @@ void Credits_HangForever() {
   bytewise_extended_oam[0] = bytewise_extended_oam[1] = bytewise_extended_oam[2] = bytewise_extended_oam[3] = 2;
 }
 
-void Credits_FadeInTheEnd() {
-  if (!(frame_counter & 7)) {
-    PaletteFilter_SP5F();
-    if (!BYTE(palette_filter_countdown))
-      submodule_index++;;
-  }
-  Credits_HangForever();
-}
-
-static PlayerHandlerFunc *const kEndSequence_Funcs[39] = {
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&Credits_LoadNextScene_Dungeon,
-&Credits_ScrollScene_Dungeon,
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&Credits_LoadNextScene_Dungeon,
-&Credits_ScrollScene_Dungeon,
-&Credits_LoadNextScene_Dungeon,
-&Credits_ScrollScene_Dungeon,
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&Credits_LoadNextScene_Overworld,
-&Credits_ScrollScene_Overworld,
-&EndSequence_32,
-&Credits_BrightenTriangles,
-&Credits_FadeColorAndBeginAnimating,
-&Credits_StopCreditsScroll,
-&Credits_FadeAndDisperseTriangles,
-&Credits_FadeInTheEnd,
-&Credits_HangForever,
-};
-
-void Module1A_Credits() {
-  oam_region_base[0] = 0x30;
-  oam_region_base[1] = 0x1d0;
-  oam_region_base[2] = 0x0;
-
-  kEndSequence_Funcs[submodule_index]();
-}
-
-void Intro_Init_Continue();
-
-void Intro_InitializeBackgroundSettings() {
-  zelda_ppu_write(SETINI, 0);
-  BGMODE_copy = 9;
-  MOSAIC_copy = 0;
-  zelda_ppu_write(BG1SC, 0x13);
-  zelda_ppu_write(BG2SC, 3);
-  zelda_ppu_write(BG3SC, 0x63);
-  zelda_ppu_write(BG12NBA, 0x22);
-  zelda_ppu_write(BG34NBA, 7);
-  CGADSUB_copy = 32;
-  COLDATA_copy0 = 32;
-  COLDATA_copy1 = 64;
-  COLDATA_copy2 = 128;
-}
-
-void Intro_SetupScreen() {
-  nmi_disable_core_updates = 0x80;
-  EnableForceBlank();
-  TM_copy = 16;
-  TS_copy = 0;
-  Intro_InitializeBackgroundSettings();
-  CGWSEL_copy = 32;
-  zelda_ppu_write(OBSEL, 2);
-  load_chr_halfslot_even_odd = 20;
-  Graphics_LoadChrHalfSlot();
-  load_chr_halfslot_even_odd = 0;
-  LoadOWMusicIfNeeded();
-
-  zelda_ppu_write(VMAIN, 0x80);
-  zelda_ppu_write_word(VMADDL, 0x27f0);
-  int i = 16;
-  do {
-    zelda_ppu_write_word(VMDATAL, 0);
-    main_palette_buffer[144 + i] = 0x7fff;
-  } while (--i >= 0);
-  R16 = 0x1ffe;
-  R18 = 0x1bfe;
-}
-
-void Intro_Init() {
-  Intro_SetupScreen();
-  INIDISP_copy = 15;
-  subsubmodule_index = 0;
-  flag_update_cgram_in_nmi++;
-  submodule_index++;
-  sound_effect_2 = 10;
-  Intro_Init_Continue();
-}
-
-void Intro_Clear1kbBlocksOfWRAM() {
-  uint16 i = R16;
-  uint8 *dst = (uint8 *)&g_ram[0x2000];
-  do {
-    for (int j = 0; j < 15; j++)
-      WORD(dst[i + j * 0x2000]) = 0;
-  } while ((i -= 2) != R18);
-  R16 = i;
-  R18 = i - 0x400;
-}
-
-void Intro_InitializeMemory_darken() {
-  EnableForceBlank();
-  EraseTileMaps_normal();
-  zelda_ppu_write(OBSEL, 2);
-  main_tile_theme_index = 35;
-  sprite_graphics_index = 125;
-  aux_tile_theme_index = 81;
-  misc_sprites_graphics_index = 8;
-  LoadDefaultGraphics();
-  InitializeTilesets();
-  DecompressAnimatedDungeonTiles(0x5d);
-  bg_tile_animation_countdown = 2;
-  BYTE(overworld_screen_index) = 0;
-  dung_hdr_palette_1 = 0;
-  overworld_palette_aux3_bp7_lo = 0;
-  R16 = 0;
-  R18 = 0;
-  darkening_or_lightening_screen = 2;
-  palette_filter_countdown = 31;
-  mosaic_target_level = 0;
-  submodule_index++;
-}
-
-void FadeMusicAndResetSRAMMirror() {
-  irq_flag = 255;
-  TM_copy = 0x15;
-  TS_copy = 0;
-  player_is_indoors = 0;
-  music_control = 0xf1;
-  SetBackdropcolorBlack();
-
-  memset(&link_y_coord, 0, 0x70);
-  memset(save_dung_info, 0, 256 * 5);
-
-  main_module_index = 1;
-  death_var4 = 1;
-  submodule_index = 0;
-}
-
-void Intro_RunStep() {
-  switch (intro_step_index) {
-  case 0:
-    if (++intro_step_timer == 64)
-      intro_step_index++;
-    poly_b += 5, poly_a += 3;
-    break;
-  case 1:
-    if (poly_config1 < 2) {
-      poly_config1 = 0;
-      intro_step_index++;
-      intro_step_timer = 64;
-      return;
-    }
-    poly_config1 -= 2;
-    poly_b += 5;
-    poly_a += 3;
-    if (poly_config1 < 225)
-      submodule_index = 4;
-    if (poly_config1 == 113)
-      music_control = 1;
-    break;
-  case 2:
-    if (!--intro_step_timer) {
-      intro_step_index++;
-    } else {
-      poly_b += 5, poly_a += 3;
-    }
-    break;
-  case 3:
-    if (poly_b >= 250 && poly_a >= 252) {
-      intro_step_index++;
-      intro_step_timer = 32;
-    } else {
-      poly_b += 5, poly_a += 3;
-    }
-    break;
-  case 4:
-    poly_b = 0;
-    poly_a = 0;
-    if (!--intro_step_timer) {
-      intro_step_index++;
-      intro_sprite_isinited[5] = 1;
-      intro_sprite_subtype[5] = 3;
-      TM_copy = 0x10;
-      TS_copy = 5;
-      CGWSEL_copy = 2;
-      CGADSUB_copy = 0x31;
-      subsubmodule_index = 0;
-      flag_update_cgram_in_nmi++;
-      nmi_load_bg_from_vram = 3;
-      submodule_index++;
-    }
-    break;
-  }
-
-}
-
-void Intro_AnimateTriforce() {
+void CrystalCutscene_InitializePolyhedral() {  // 9ecdd9
+  poly_config1 = 156;
+  poly_config_color_mode = 1;
   is_nmi_thread_active = 1;
-  if (!intro_did_run_step) {
-    Intro_RunStep();
-    intro_did_run_step = 1;
-  }
+  intro_did_run_step = 1;
+  poly_base_x = 32;
+  poly_base_y = 32;
+  BYTE(poly_var1) = 32;
+  poly_which_model = 0;
+  poly_a = 16;
+  TS_copy = 0;
+  TM_copy = 0x16;
 }
 
-void Intro_HandleAllTriforceAnimations() {
-  intro_frame_ctr++;
-  Intro_AnimateTriforce();
-  Scene_AnimateEverySprite();
-}
-
-#define intro_sword_ypos WORD(g_ram[0xc8])
-#define intro_sword_18 g_ram[0xca]
-#define intro_sword_19 g_ram[0xcb]
-#define intro_sword_20 g_ram[0xcc]
-#define intro_sword_21 g_ram[0xcd]
-#define intro_sword_24 g_ram[0xd0]
-
-void Intro_SetupSwordAndIntroFlash() {
-  intro_sword_19 = 7;
-  intro_sword_20 = 0;
-  intro_sword_21 = 0;
-  intro_sword_ypos = -130;
-
-  Intro_PeriodicSwordAndIntroFlash();
-}
-
-void Intro_PeriodicSwordAndIntroFlash() {
-  if (intro_sword_18)
-    intro_sword_18--;
-  SetBackdropcolorBlack();
-  if (intro_times_pal_flash) {
-    if ((intro_times_pal_flash & 3) != 0) {
-      (&COLDATA_copy0)[intro_sword_24] |= 0x1f;
-      intro_sword_24 = (intro_sword_24 == 2) ? 0 : intro_sword_24 + 1;
-    }
-    intro_times_pal_flash--;
-  }
-  OamEnt *oam = oam_buf + 0x52;
-  for (int j = 9; j >= 0; j--) {
-    static const uint8 kIntroSword_Char[10] = { 0, 2, 0x20, 0x22, 4, 6, 8, 0xa, 0xc, 0xe };
-    static const uint8 kIntroSword_X[10] = { 0x40, 0x40, 0x30, 0x50, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40 };
-    static const uint16 kIntroSword_Y[10] = { 0x10, 0x20, 0x28, 0x28, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80 };
-    bytewise_extended_oam[0x52 + j] = 2;
-    oam[j].charnum = kIntroSword_Char[j];
-    oam[j].flags = 0x21;
-    oam[j].x = kIntroSword_X[j];
-    uint16 y = intro_sword_ypos + kIntroSword_Y[j];
-    oam[j].y = ((y & 0xff00) ? 0xf8 : y) - 8;
-  }
-
-  if (intro_sword_ypos != 30) {
-    if (intro_sword_ypos == 0xffbe) {
-      sound_effect_1 = 1;
-    } else if (intro_sword_ypos == 14) {
-      WORD(intro_sword_24) = 0;
-      intro_times_pal_flash = 0x20;
-      sound_effect_1 = 0x2c;
-    }
-    intro_sword_ypos += 16;
-  }
-
-  switch (intro_sword_20 >> 1) {
-  case 0:
-    if (!intro_times_pal_flash && intro_sword_ypos == 30)
-      intro_sword_20 += 2;
-    break;
-  case 1: {
-    static const uint8 kSwordSparkle_Tab[8] = { 4, 4, 6, 6, 6, 4, 4 };
-
-    if (!intro_sword_18) {
-      intro_sword_19 -= 1;
-      if (sign8(intro_sword_19)) {
-        intro_sword_19 = 0;
-        intro_sword_18 = 2;
-        intro_sword_20 += 2;
-        return;
-      }
-      intro_sword_18 = kSwordSparkle_Tab[intro_sword_19];
-    }
-    static const uint8 kSwordSparkle_Char[7] = { 0x28, 0x37, 0x27, 0x36, 0x27, 0x37, 0x28 };
-    bytewise_extended_oam[0x50] = 0;
-    oam_buf[0x50].x = 0x44;
-    oam_buf[0x50].y = 0x43;
-    oam_buf[0x50].flags = 0x25;
-    oam_buf[0x50].charnum = kSwordSparkle_Char[intro_sword_19];
-    break;
-  }
-  case 2: {
-    static const uint8 kIntroSwordSparkle_Char[8] = { 0x26, 0x20, 0x24, 0x34, 0x25, 0x20, 0x35, 0x20 };
-    int k = intro_sword_19;
-    if (k >= 7)
-      return;
-    bytewise_extended_oam[0x50] = 0;
-    bytewise_extended_oam[0x51] = 0;
-    oam_buf[0x51].x = oam_buf[0x50].x = 0x42;
-
-    uint8 y = (intro_sword_21 < 0x50 ? intro_sword_21 : 0x4f) + intro_sword_ypos + 0x31;
-    oam_buf[0x50].y = y;
-    oam_buf[0x51].y = y + 8;
-    oam_buf[0x50].charnum = kIntroSwordSparkle_Char[k];
-    oam_buf[0x51].charnum = kIntroSwordSparkle_Char[k + 1];
-    oam_buf[0x51].flags = oam_buf[0x50].flags = 0x23;
-    if (intro_sword_18 == 0) {
-      intro_sword_21 += 4;
-      if (intro_sword_21 == 0x4 || intro_sword_21 == 0x48 || intro_sword_21 == 0x4c || intro_sword_21 == 0x58)
-        intro_sword_19 += 2;
-    }
-    break;
-  }
-  }
-}
-
-
-void IntroZeldaFadein() {
-  Intro_HandleAllTriforceAnimations();
-  if (!(frame_counter & 1))
-    return;
-  Palette_FadeIntroOneStep();
-  if (BYTE(palette_filter_countdown) == 0) {
-    subsubmodule_index = 42;
-    submodule_index++;
-    Intro_SetupSwordAndIntroFlash();
-  } else if (BYTE(palette_filter_countdown) == 13) {
-    TM_copy = 0x15;
-    TS_copy = 0;
-  }
-}
-
-void Intro_SwordComingDown() {
-  Intro_HandleAllTriforceAnimations();
-  intro_did_run_step = 0;
-  is_nmi_thread_active = 0;
-  Intro_PeriodicSwordAndIntroFlash();
-  if (!--subsubmodule_index) {
-    submodule_index++;
-    CGWSEL_copy = 2;
-    CGADSUB_copy = 0x22;
-    palette_filter_countdown = 31;
-    TS_copy = 2;
-  }
-}
-
-void Intro_FadeInBg() {
-  Intro_PeriodicSwordAndIntroFlash();
-  Intro_HandleAllTriforceAnimations();
-  if (BYTE(palette_filter_countdown)) {
-    if (frame_counter & 1)
-      Palette_FadeIntro2();
-  } else {
-    if ((filtered_joypad_L & 0xc0 | filtered_joypad_H) & 0xd0)
-      FadeMusicAndResetSRAMMirror();
-    else {
-      if (!--subsubmodule_index)
-        submodule_index++;
-    }
-  }
-}
-
-void Intro_WaitPlayer() {
-  Intro_HandleAllTriforceAnimations();
-  intro_did_run_step = 0;
-  is_nmi_thread_active = 0;
-  Intro_PeriodicSwordAndIntroFlash();
-  if (!--subsubmodule_index) {
-    submodule_index++;
-    main_module_index = 20;
-    submodule_index = 0;
-    BYTE(link_x_coord) = 0;
-  }
-}
-
-
-void Intro_LoadTextPointersAndPalettes() {
-  Text_GenerateMessagePointers();
-  Overworld_LoadAllPalettes();
-}
-
-void Intro_DisplayLogo() {
-  static const uint8 kIntroLogo_X[4] = { 0x60, 0x70, 0x80, 0x88 };
-  static const uint8 kIntroLogo_Tile[4] = { 0x69, 0x6b, 0x6d, 0x6e };
-  OamEnt *oam = oam_buf;
-  for (int i = 0; i < 4; i++) {
-    oam[i].x = kIntroLogo_X[i];
-    oam[i].y = 0x68;
-    oam[i].charnum = kIntroLogo_Tile[i];
-    oam[i].flags = 0x32;
-    bytewise_extended_oam[i] = 2;
-  }
-}
-
-
-void Intro_Init_Continue() {
-  Intro_DisplayLogo();
-  int t = subsubmodule_index++;
-  if (t >= 11) {
-    if (--INIDISP_copy)
-      return;
-    Intro_InitializeMemory_darken();
-    return;
-  }
-  switch (t) {
-  case 0: case 1: case 2: case 3: case 4: case 5: case 6: case 7:
-    Intro_Clear1kbBlocksOfWRAM();
-    break;
-  case 8: Intro_LoadTextPointersAndPalettes(); break;
-  case 9: LoadItemGFXIntoWRAM4BPPBuffer(); break;
-  case 10:LoadFollowerGraphics(); break;
-  }
-}
-
-
-void Module00_Intro() {
-  if (submodule_index >= 8 && ((filtered_joypad_L & 0xc0 | filtered_joypad_H) & 0xd0)) {
-    FadeMusicAndResetSRAMMirror();
-    return;
-  }
-  switch (submodule_index) {
-  case 0: Intro_Init(); break;
-  case 1: Intro_Init_Continue(); break;
-  case 10:
-  case 2: Intro_InitializeTriforcePolyThread(); break;
-  case 3:
-  case 4:
-  case 9:
-  case 11: Intro_HandleAllTriforceAnimations(); break;
-  case 5: IntroZeldaFadein(); break;
-  case 6: Intro_SwordComingDown(); break;
-  case 7: Intro_FadeInBg(); break;
-  case 8: Intro_WaitPlayer(); break;
-  }
-}
-
-
-static const uint16 kEnding_Tab1[16] = { 
-  0x1000, 2, 0x1002, 0x1012, 0x1004, 0x1006, 0x1010, 0x1014, 0x100a,
-  0x1016, 0x5d, 0x64, 0x100e, 0x1008, 0x1018, 0x180 };
-static const uint8 kEnding_SpritePack[17] = {
-  0x28, 0x46, 0x27, 0x2e, 0x2b, 0x2b, 0xe, 0x2c, 0x1a, 0x29, 0x47, 0x28, 0x27, 0x28, 0x2a, 0x28, 0x2d,
-};
-static const uint8 kEnding_SpritePal[17] = {
-  1, 0x40, 1, 4, 1, 1, 1, 0x11, 1, 1, 0x47, 0x40, 1, 1, 1, 1, 1,
-};
-
-
-void Credits_LoadScene_Dungeon() {
-  EnableForceBlank();
-  EraseTileMaps_normal();
-  WORD(which_entrance) = kEnding_Tab1[submodule_index >> 1];
-
-  Dungeon_LoadEntrance();
-  dung_num_lit_torches = 0;
-  hdr_dungeon_dark_with_lantern = 0;
-  Dungeon_LoadAndDrawRoom();
-  DecompressAnimatedDungeonTiles(kDungAnimatedTiles[main_tile_theme_index]);
-
-  int i = submodule_index >> 1;
-  sprite_graphics_index = kEnding_SpritePack[i];
-  const DungPalInfo *dpi = GetDungPalInfo(kEnding_SpritePal[i] & 0x3f);
-  sprite_aux1_palette = dpi->pal2;
-  sprite_aux2_palette = dpi->pal3;
-  misc_sprites_graphics_index = 10;
-  InitializeTilesets();
-  palette_sp6 = 10;
-  Dungeon_LoadPalettes();
-  BGMODE_copy = 9;
-  R16 = 0;
-  INIDISP_copy = 0;
-  submodule_index++;
-  Credits_PrepAndLoadSprites();
-}
-
-void Credits_LoadScene_Overworld_PrepGFX() {
-  EnableForceBlank();
-  EraseTileMaps_normal();
-  CGWSEL_copy = 0x82;
-  int k = submodule_index >> 1;
-  dungeon_room_index = kEnding_Tab1[k];
-
-  if (k != 6 && k != 15)
-    LoadOverworldFromDungeon();
-  else
-    Overworld_EnterSpecialArea();
-  music_control = 0;
-  sound_effect_ambient = 0;
-
-  int t = BYTE(overworld_screen_index) & ~0x40;
-  DecompressAnimatedOverworldTiles((t == 3 || t == 5 || t == 7) ? 0x58 : 0x5a);
-
-  k = submodule_index >> 1;
-  sprite_graphics_index = kEnding_SpritePack[k];
-  uint8 sprpal = kEnding_SpritePal[k];
-  InitializeTilesets();
-  OverworldLoadScreensPaletteSet();
-  Overworld_LoadPalettes(GetOverworldBgPalette(BYTE(overworld_screen_index)), sprpal);
-
-  hud_palette = 1;
-  Palette_Load_HUD();
-  if (!submodule_index)
-    TransferFontToVRAM();
-  Overworld_LoadPalettesInner();
-  Overworld_SetFixedColAndScroll();
-  if (BYTE(overworld_screen_index) >= 128)
-    Palette_SetOwBgColor();
-  BGMODE_copy = 9;
-  subsubmodule_index++;
-}

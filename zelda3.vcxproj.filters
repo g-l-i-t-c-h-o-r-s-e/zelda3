@@ -225,5 +225,8 @@
     <ClInclude Include="spc_player.h">
       <Filter>Zelda</Filter>
     </ClInclude>
+    <ClInclude Include="sprite_main.h">
+      <Filter>Zelda</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
