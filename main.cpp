@@ -57,12 +57,13 @@ int main(int argc, char** argv) {
     printf("Failed to init SDL: %s\n", SDL_GetError());
     return 1;
   }
-  SDL_Window* window = SDL_CreateWindow("Zelda3", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 512*2, 480*2, 0);
+  SDL_Window* window = SDL_CreateWindow("Zelda3", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 512*2, 480*2, SDL_WINDOW_RESIZABLE);
   if(window == NULL) {
     printf("Failed to create window: %s\n", SDL_GetError());
     return 1;
   }
   SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+  SDL_RenderSetLogicalSize(renderer, 512*2, 480*2);
   if(renderer == NULL) {
     printf("Failed to create renderer: %s\n", SDL_GetError());
     return 1;
