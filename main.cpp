@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -34,6 +35,7 @@ static void renderScreen(SDL_Renderer* renderer, SDL_Texture* texture);
 static void handleInput(int keyCode, int modCode, bool pressed);
 
 int input1_current_state;
+int nobeep = 0;
 
 void setButtonState(int button, bool pressed) {
   // set key in constroller
@@ -67,6 +69,20 @@ int main(int argc, char** argv) {
     printf("Failed to create texture: %s\n", SDL_GetError());
     return 1;
   }
+  
+  
+  if (argv[1] != NULL) {
+      if (strcmp(argv[1], "nobeep") == 1) {
+          nobeep = 0;
+      }
+
+      if (strcmp(argv[1], "nobeep") == 0) {
+          nobeep = 1;
+          printf("Low Health Beep Disabled!\n");
+      }
+  }
+
+  
   SDL_AudioSpec want, have;
   SDL_AudioDeviceID device;
   SDL_memset(&want, 0, sizeof(want));
@@ -84,14 +100,36 @@ int main(int argc, char** argv) {
   SDL_PauseAudioDevice(device, 0);
 
   Snes *snes = snes_init(g_emulated_ram), *snes_run = NULL;
-  if (argc >= 2 && !g_run_without_emu) {
-    // init snes, load rom
-    bool loaded = loadRom(argv[1], snes);
-    if (!loaded) {
-      puts("No rom loaded");
-      return 1;
-    }
-    snes_run = snes;
+  
+  if (argv[2] != NULL) {
+      std::string haystack = argv[2];
+      std::string needle = ".sfc";
+
+      if (haystack.find(needle) != std::string::npos && !g_run_without_emu) {
+          puts(argv[2]);
+          // init snes, load rom
+          bool loaded = loadRom(argv[2], snes);
+          if (!loaded) {
+              puts("No rom loaded");
+              return 1;
+          }
+          snes_run = snes;
+      }
+  }
+  if (argv[1] != NULL) {
+      std::string haystack = argv[1];
+      std::string needle = ".sfc";
+
+      if (haystack.find(needle) != std::string::npos && !g_run_without_emu) {
+          puts(argv[1]);
+          // init snes, load rom
+          bool loaded = loadRom(argv[1], snes);
+          if (!loaded) {
+              puts("No rom loaded");
+              return 1;
+          }
+          snes_run = snes;
+      } 
   } else {
     snes_reset(snes, true);
   }

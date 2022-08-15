@@ -70,3 +70,4 @@ void Hud_UpdateInternal();
 void Hud_Update_IgnoreItemBox();
 void Hud_Update_IgnoreHealth();
 void Hud_UpdateHearts(uint16 *dst, const uint16 *src, int n);
+extern int nobeep;
